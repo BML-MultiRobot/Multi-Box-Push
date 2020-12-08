@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-from torch.distributions import Normal
+from torch.distributions import Normal, Categorical
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.nn.init as init
@@ -49,9 +49,8 @@ class SoftNetwork(Network):
         mu = self.output(x)
         if self.discrete:
             policy = self.soft(mu)
-            action = self.choose(policy)
-            log_prob = torch.log(policy.gather(1, action.unsqueeze(1)))
-            return action, log_prob, None, None, None
+            return Categorical(policy)
+        """
         else:
             log_std = self.log_std_output(x)
             log_std = torch.clamp(log_std, self.clamp[0], self.clamp[1])
@@ -63,11 +62,11 @@ class SoftNetwork(Network):
             log_prob = normal.log_prob(z) - torch.log(1 - action.pow(2) + 1e-6)
             log_prob = log_prob.sum(-1, keepdim=True)
 
-            return self.mean_range * action, log_prob, z, mu, log_std
+            return self.mean_range * action, log_prob, z, mu, log_std"""
 
     def get_action(self, s):
         s = torch.FloatTensor(s).unsqueeze(0)
-        a, _, _, _, _ = self.forward(s)
-        return self.mean_range * a.detach().cpu().numpy()[0]
+        distribution = self.forward(s)
+        return distribution.sample()
     
 

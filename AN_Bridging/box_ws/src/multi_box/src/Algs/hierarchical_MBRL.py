@@ -17,7 +17,7 @@ import time
 from Networks.model_network import Model
 from Tasks.task import distance as dist
 from agent import Agent
-from Tasks.hierarchyTask import HierarchyTask
+from Tasks.hierarchical_controller import HierarchicalController
 from doubleQ import DoubleQ
 from Buffers.CounterFactualBuffer import Memory
 from scipy.stats import multivariate_normal
@@ -34,7 +34,7 @@ class Hierarchical_MBRL(Agent):
             # Otherwise, the task will reference DoubleQ as the agent...not this class (Hierarchical_MBRL)
             self.model = Model(self.vPars, self.vTrain, task)
         else:
-            self.policy = DoubleQ(params['doubleQ_params'], name, task, load_path='/home/jimmy/Documents/Research/AN_Bridging/model_training_data/hierarchical_q_policy2.txt')
+            self.policy = DoubleQ(params['doubleQ_params'], name, task, load_path='/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Pure_Q_With_Reward_Shaping/Trial_8_Solid/hierarchical_q_policy2.txt')
             self.model = Model(self.vPars, self.vTrain, task)
             # self.model.load_state_dict(torch.load('/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Pure_Q/Combination_2/model_differential2.txt'))
             # paths = ['/home/jimmy/Documents/Research/AN_Bridging/model.txt']
@@ -45,7 +45,7 @@ class Hierarchical_MBRL(Agent):
 
         self.num_sequences = 50
         self.length_sequences = 10
-        self.controller = HierarchyTask()
+        self.controller = HierarchicalController()
 
         """
         Pure_MPC: Training model and only using MPC for policy.                         Testing: Uses MPC only
@@ -53,8 +53,11 @@ class Hierarchical_MBRL(Agent):
         AIDED_MFRL: Training using model to aid control selection for Q policy          Testing: Uses Q Policy only
         """
         self.method = 'Pure_MFRL'
-        self.policy_action_selection = 'DETERM' #'PROB'#
-        self.testing_to_record_progress = True
+        self.policy_action_selection = 'PROB' # 'DETERM' # PROB will trigger probabilistic training but deterministic testing
+
+        self.has_box_in_simulation = True
+
+        self.testing_to_record_progress = True  # Don't change this. Setting this to True makes it START with training
         self.epochs = 200
 
         self.counter = 0
@@ -63,10 +66,9 @@ class Hierarchical_MBRL(Agent):
         self.gmm_counter = 0
         self.gmm_period = 1
         self.weight_towards_model = .7
-        self.success_states = np.zeros((1,9))
+        self.success_states = np.zeros((1,10))
 
         torch.set_num_threads(2)
-
 
         self.loss = []
         self.validation_loss = []
@@ -147,7 +149,10 @@ class Hierarchical_MBRL(Agent):
             print(' Experience length: ', max(len(self.policy.exp), len(self.model.transitions)))
 
     def concatenate_identifier(self, s):
-        return np.hstack((s, np.repeat(1, s.shape[0]).reshape(-1,1)))
+        """identifier = 1 if self.has_box_in_simulation else 0
+        return np.hstack((s, np.repeat(identifier, s.shape[0]).reshape(-1, 1)))"""
+        # we get rid of this because train two different policies is easier
+        return s
     
     def get_action(self, s):
         self.task.stop_moving()
@@ -157,7 +162,7 @@ class Hierarchical_MBRL(Agent):
         AIDED_MFRL: Training using model to aid control selection for Q policy      Testing: Uses Q Policy only
         """
         if not self.testing_to_record_progress:
-            self.explore = max(.1, self.explore * .9997) # NOTE: was .9996 before
+            self.explore = max(.2, self.explore * .9997) # NOTE: was .9996 before
         if self.method == 'Pure_MPC':
             return self.solo_MPC_model_return(s, testing_time=self.testing_to_record_progress)
         if self.method == 'Pure_MFRL':
@@ -173,7 +178,10 @@ class Hierarchical_MBRL(Agent):
         print('')
         if i < self.explore and not testing_time and self.trainMode:
             return np.random.randint(self.u_n)
-        return self.policy.get_action(self.concatenate_identifier(s), testing_time, probabilistic=(self.policy_action_selection == 'PROB'))
+        if self.policy_action_selection == 'PROB':
+            return self.policy.get_action(self.concatenate_identifier(s), testing_time, probabilistic=True)
+        else:
+            return self.policy.get_action(self.concatenate_identifier(s), testing_time, probabilistic=False)
     
     def solo_MPC_model_return(self, s, testing_time):
         actions = np.random.choice(self.u_n, (self.num_sequences, self.length_sequences))

@@ -1,0 +1,25 @@
+<launch>
+    <!-- recursive launch file to start up many robot nodes -->
+    <arg name="num_bots" default="1"/>
+    <arg name="first_recursive" default="1"/>
+
+    <group ns="$(eval 'agents')">
+        <node pkg = "multi_box" type = "aa_stigmergic_algorithm_wrapper.py" name = "$(eval 'robot' + str(arg('num_bots') - 1))" output = 'screen'>
+            <param name= "robot_id" value="$(eval arg('num_bots') - 1)"/>
+        </node>
+    </group>
+
+   <include file="$(find multi_box)/launch/stigmergic.launch" if="$(eval arg('num_bots') - 1 > 0)">
+       <arg name="num_bots" value="$(eval arg('num_bots') - 1)"/>
+       <arg name="first_recursive" default="0"/>
+   </include>
+
+
+    <!-- Only one manager for all the robots-->
+    <group ns="managers" if="$(eval arg('first_recursive'))">
+        <node pkg = "multi_box" type = "manager.py" name = "manager" output = "screen"/>
+        <node pkg = "multi_box" type = "aa_graph_map_manager.py" name = "map" output = "screen">
+            <param name= "num_agents" value="$(eval arg('num_bots'))"/>
+        </node>
+    </group>
+</launch>

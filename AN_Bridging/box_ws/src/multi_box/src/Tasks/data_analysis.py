@@ -8,45 +8,8 @@ from copy import deepcopy
 from sklearn.cluster import SpectralClustering
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.svm import SVC
-from sklearn.decomposition import PCA 
-
-model_paths = {
-    'slope_push': '/home/jimmy/Documents/Research/AN_Bridging/SLOPE_PUSH_state_data_GP3_over_edge.txt',
-    'push_in_hole': '/home/jimmy/Documents/Research/AN_Bridging/PUSH_IN_HOLE_state_data_GP.txt',
-    'cross': '/home/jimmy/Documents/Research/AN_Bridging/CROSS_state_data_GP.txt',
-    'push_towards': '/home/jimmy/Documents/Research/AN_Bridging/PUSH_TOWARDS_state_data_GP.txt',
-    'reorient': '/home/jimmy/Documents/Research/AN_Bridging/REORIENT_state_data_GP2_better.txt',
-}
-
-"""analytics_paths = {
-    'slope_push': '/home/jimmy/Documents/Research/AN_Bridging/SLOPE_PUSH_state_data_analytics_small_box.txt',
-    'push_in_hole': '/home/jimmy/Documents/Research/AN_Bridging/PUSH_IN_HOLE_state_data_analytics.txt',
-    'cross': '/home/jimmy/Documents/Research/AN_Bridging/CROSS_state_data_analytics.txt',
-    'push_towards': '/home/jimmy/Documents/Research/AN_Bridging/PUSH_TOWARDS_state_data_analytics.txt',
-    'reorient': '/home/jimmy/Documents/Research/AN_Bridging/REORIENT_state_data_analytics.txt',
-}"""
-
-analytics_paths = {
-    # NOTE: This is what you change to get PLANNER model data training
-    'combination': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Pure_Q/Determ/Combination_1/Pure_MFRL_state_data.txt'
-    # /home/jimmy/Documents/Research/AN_Bridging/model_training_data/Pure_Q/Determ/Combination_1/Pure_MFRL_state_data.txt
-}
-
-reward_paths = {
-    # 'Pure_Q_Determ': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Elevated_Box_Push_In_Pure_Q_Deterministic/testing_rewards.txt',
-    #'Pure_Q_Stochastic': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Pure_Q/Push_In_Hole_1/testing_rewards.txt',
-    #'Pure_MPC': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Elevated_Box_Push_In_Pure_MPC/testing_rewards.txt',
-    #'Hybrid_Aided': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Elevated_Box_Push_In_Aided_Hybrid/testing_rewards.txt',
-    #'Hybrid_Aided_Sparse': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Elevated_Box_Push_In_Aided_Hybrid_2/testing_rewards.txt',  
-    #'Pure_MPC_Sparse': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/MPC/Push_In_Hole_One_Hot_1/testing_rewards.txt',
-    #'Hybrid_Aided_One_Hot': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Hybrid/Push_In_Hole_One_Hot_2/testing_rewards.txt',  
-    #'Pure_Q_Stochastic':'/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Pure_Q/Combination_4/testing_rewards.txt',  
-    'MPC':'/home/jimmy/Documents/Research/AN_Bridging/model_training_data/MPC/Combination_1/testing_rewards.txt',  
-    'Pure_Q_Determ': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Pure_Q/Determ/Combination/testing_rewards.txt',
-    'Pure_Q_Aided_Gaussian': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Hybrid/Combination_Gaussian_Reverse/testing_rewards.txt',
-    'Pure_Q_Aided_GMM': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Hybrid/Combination_GMM/testing_rewards.txt',
-    'Pure_Q_Aided_Model_Q': '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/testing_rewards.txt'
-}
+from sklearn.decomposition import PCA
+import time as timer
 
 features = {
     'bot_to_box_x': 0,
@@ -74,7 +37,7 @@ indices_to_features = {
 }
 
 class Analysis(object):
-    def __init__(self, mode):
+    def __init__(self, path):
         self.id_to_primitive = {}
         self.primitive_to_id = {}
         self.histogram_bins = 15
@@ -86,39 +49,12 @@ class Analysis(object):
         self.min_step_size = .2
         self.n_clusters = 7
 
-        self.mode = mode
-        if self.mode == 'Analysis':
-            self.curr_path = analytics_paths
-        else:
-            self.curr_path = model_paths
-        self.success, self.success_prime, self.fail, self.fail_prime, self.success_start, self.fail_start, self.time, self.success_rewards, self.fail_rewards = self._process_data()
-        pass 
+        self.curr_path = path
+        self.success, self.fail = self._process_data()
+        pass
     
     def analyze_requested_data(self):
-        """self.analyze_feature_to_time('box_yaw', 'reorient')
-        self.analyze_feature_to_time('bot_to_box_y', 'reorient')
-        self.analyze_feature_to_time('bot_to_box_y', 'push_in_hole')
-        self.analyze_feature_to_time('bot_to_box_x', 'push_in_hole')
-
-        self.analyze_3d_start_state('bot_to_box_x', 'bot_to_box_y', 'box_yaw','reorient')
-        self.analyze_3d_start_state('bot_to_box_x', 'bot_to_box_y', 'box_yaw', 'push_in_hole')
-        self.analyze_3d_start_state('bot_to_box_x', 'bot_to_box_y', 'bot_yaw', 'cross')
-        self.analyze_3d_start_state('bot_to_box_x', 'bot_to_box_y', 'box_yaw', 'push_towards')
-
-        self.analyze_start_state('bot_to_box_y', 'push_in_hole')    
-        self.analyze_start_state('box_yaw', 'reorient')
-        self.analyze_start_state('bot_to_goal_y', 'push_towards')
-        self.analyze_start_state('bot_to_goal_y', 'reorient')
-        self.analyze_start_state('bot_yaw', 'slope_push')  """
-        # self.analyze_3d_start_state('bot_to_box_y', 'bot_to_goal_x', 'bot_to_goal_y', 'push_in_hole')
-        #features = self.random_forest_extract_decision_boundaries(self.success, self.fail, 'push_in_hole',  plot=True)
-        #features = self.random_forest_extract_features(self.success_start, self.fail_start, 'cross', plot=True)
-        #features = self.random_forest_extract_features(self.success_start, self.fail_start, 'push_towards', plot=True)
-        #features = self.random_forest_extract_features(self.success_start, self.fail_start, 'reorient', plot=True)
-        #features = self.random_forest_extract_features(self.success_start, self.fail_start, 'slope_push', plot=True)
-        # self.plot_past_rewards()
-        self.rf, self.svm, self.pdf_generator, points_in_ellipsoid = self.measure_reliability_and_success(self.success['combination'], self.fail['combination'])
-        return 
+        return
 
     def plot_past_rewards(self):
         colors = ['r', 'g', 'b', 'k', 'c', 'm', 'y']
@@ -127,12 +63,8 @@ class Analysis(object):
                 data = pickle.load(f)
             if len(data) <= 200:
                 continue
-                #data = data[:200]
-            #x = range(len(data))
-            # plt.plot(x, data)
+
             plt.title("Rewards Over Episodes w/ Moving Average")
-            #window= np.ones(int(100))/float(100)
-            #lineRewards = np.convolve(data, window, 'same')
             lineRewards = Analysis.get_moving_average(data, 100)[40:] # approxiately when starts training
             x = range(len(lineRewards))
             plt.plot(x, lineRewards, colors[i], label=name)
@@ -153,100 +85,88 @@ class Analysis(object):
             else:
                 moving_aves.append(cumsum[i] / len(cumsum))
         return moving_aves
-            
-    
-    def measure_reliability_and_success(self, success, fail):
+
+    def get_classifiers(self, svm_degree=2):
+        return self.measure_reliability_and_success(self.success, self.fail, svm_degree=svm_degree)
+
+    def measure_reliability_and_success(self, success, fail, svm_degree=2):
         all_points = np.vstack((success, fail))
-        indices = self.variance_thresholding(all_points)
-        # NOTE: Got rid of variance thresholding here
         indices = np.linspace(0, all_points.shape[1], all_points.shape[1], endpoint=False).astype(int)
         all_points = all_points[:, indices]
-        print(success.shape, fail.shape)
-
-        print('  Features kept for analysis: ')
-        for index in indices:
-            print(indices_to_features[index])
-        print('')
         labels = np.hstack((np.repeat(1, success.shape[0]), np.repeat(0, fail.shape[0])))
 
-        pdf_generator = self.fit_gaussian(all_points)
         # filter for similar points in all_points here
+        start = timer.time()
         rf, rf_accuracy = self.random_forest_fit(all_points, labels)
-        svm, svm_accuracy, svm_parameters = self.polynomial_svm(all_points, labels)
+        print('Random forest training time: ', timer.time() - start)
+        # start = timer.time()
+        # svm, svm_accuracy, svm_parameters = self.polynomial_svm(all_points, labels, svm_degree)
+        # print('SVM training time: ', timer.time() - start)
+
+        print('')
         print(' Random Forest Accuracy: ', rf_accuracy)
-        print(' SVM Accuracy: ', svm_accuracy)
-        print('')
+        # print(' SVM Accuracy: ', svm_accuracy)
 
-        priors = np.apply_along_axis(pdf_generator, 1, all_points)
-        conditional = rf.predict_proba(all_points)[:, 1] # probability success
-        # posterior = np.sum((conditional * priors) / np.sum(priors))
-        posterior = np.mean(conditional)
-        # print(' Probability of Success Using RF: ', posterior)
-        print(' Probability of Success Using MC: ', success.shape[0] / float(success.shape[0] + fail.shape[0]))
-        print('')
+        mask_for_success = rf.predict(all_points).astype(bool)
 
-        mask_for_success = svm.predict(all_points).astype(bool)
-        points_in_ellipsoid = all_points[mask_for_success, :]
+        # assert len(self.success_rewards + self.fail_rewards) == all_points.shape[0]
+        # rewards_associated_with_points_in_ellipsoid = np.array(self.success_rewards + self.fail_rewards)[mask_for_success]
 
-        assert len(self.success_rewards + self.fail_rewards) == all_points.shape[0]
-        rewards_associated_with_points_in_ellipsoid = np.array(self.success_rewards + self.fail_rewards)[mask_for_success]
-
-        funnel_priors = np.apply_along_axis(pdf_generator, 1, points_in_ellipsoid)
-        conditional = rf.predict_proba(points_in_ellipsoid)[:, 1]
+        # conditional = rf.predict_proba(points_in_ellipsoid)[:, 1]
         # posterior = np.sum((conditional * funnel_priors) / np.sum(funnel_priors))
-        posterior = np.mean(conditional)
-        approx_prob_in_ellipsoid = np.sum(funnel_priors) / np.sum(priors)
         # print(' Posterior Probability Success Given Inside Ellipsoid Funnel Using RF: ', posterior)
         labels_of_points_in_ellipsoid = labels[mask_for_success]
-        print(' Posterior Probability Success Given Inside Ellipsoid Funnel Using MC: ', np.sum(labels_of_points_in_ellipsoid) / float(labels_of_points_in_ellipsoid.shape[0]))
-        print(' Prior MC Probability of Being Inside Ellipsoid Funnel: ', np.sum(mask_for_success) / float(mask_for_success.shape[0]))
+        print(' Posterior Probability Success Using RF Precision: ', np.sum(labels_of_points_in_ellipsoid) / float(labels_of_points_in_ellipsoid.shape[0]))
         print('')
 
+        """
+        points_in_ellipsoid = all_points[mask_for_success, :]
         bounds = self.get_bounds(points_in_ellipsoid)
         print('')
-        print(' Hyperellipsoid funnel boundaries: ')
+        print(' Hyperellipsoid funnel boundaries (only valid for degree = 2): ')
         for i in range(len(bounds)):
             feature_name = indices_to_features[indices[i]]
             boundary = bounds[i]
-            print(feature_name, ' bounds: ', boundary)
-        print('')
+            boundary = boundary[1] - boundary[0]
+            print(feature_name, ' boundary size: ', boundary)
+        print('')"""
 
-        pca = PCA(n_components=3)
-        pca.fit(points_in_ellipsoid)
-        transformed_points = pca.transform(points_in_ellipsoid)
+        # pca = PCA(n_components=3)
+        # pca.fit(points_in_ellipsoid)
+        # transformed_points = pca.transform(points_in_ellipsoid)
 
-        s1 = transformed_points[:, 0]
-        s2 = transformed_points[:, 1]
-        s3 = transformed_points[:, 2]
+        # s1 = transformed_points[:, 0]
+        # s2 = transformed_points[:, 1]
+        # s3 = transformed_points[:, 2]
 
-        minimum_reward = np.min(rewards_associated_with_points_in_ellipsoid)
-        normalized_rewards = (rewards_associated_with_points_in_ellipsoid - minimum_reward)
-        normalized_rewards = normalized_rewards / np.max(normalized_rewards)
-        colors = np.vstack([np.array([[0, r, 0]]) for r in normalized_rewards])
+        # minimum_reward = np.min(rewards_associated_with_points_in_ellipsoid)
+        # normalized_rewards = (rewards_associated_with_points_in_ellipsoid - minimum_reward)
+        # normalized_rewards = normalized_rewards / np.max(normalized_rewards)
+        # colors = np.vstack([np.array([[0, r, 0]]) for r in normalized_rewards])
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(s1, s2, s3, c=colors , marker='o')
+        # fig = plt.figure()
+        # ax = fig.add_subplot(111, projection='3d')
+        # ax.scatter(s1, s2, s3, c=colors , marker='o')
 
         # ALL POINTS
-        transformed_points = pca.transform(all_points)
+        # transformed_points = pca.transform(all_points)
 
-        s1 = transformed_points[:, 0]
-        s2 = transformed_points[:, 1]
-        s3 = transformed_points[:, 2]
+        # s1 = transformed_points[:, 0]
+        # s2 = transformed_points[:, 1]
+        # s3 = transformed_points[:, 2]
 
-        all_rewards = self.success_rewards + self.fail_rewards
-        minimum_reward = np.min(all_rewards)
-        normalized_rewards = (all_rewards - minimum_reward)
-        normalized_rewards = normalized_rewards / np.max(normalized_rewards)
-        colors = np.vstack([np.array([[0, r, 0]]) for r in normalized_rewards])
+        # all_rewards = self.success_rewards + self.fail_rewards
+        # minimum_reward = np.min(all_rewards)
+        # normalized_rewards = (all_rewards - minimum_reward)
+        # normalized_rewards = normalized_rewards / np.max(normalized_rewards)
+        # colors = np.vstack([np.array([[0, r, 0]]) for r in normalized_rewards])
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(s1, s2, s3, c=colors , marker='o')
-        plt.show()
+        # fig = plt.figure()
+        # ax = fig.add_subplot(111, projection='3d')
+        # ax.scatter(s1, s2, s3, c=colors , marker='o')
+        # plt.show()
         
-        return rf, svm, pdf_generator, points_in_ellipsoid
+        return rf# , svm, points_in_ellipsoid
     
     def get_bounds(self, points_in_ellipsoid):
         # Returns list of tuples each corresponding to limits of the respective index
@@ -257,19 +177,14 @@ class Analysis(object):
             boundaries.append((minimum, maximum))
         return boundaries
     
-    def variance_thresholding(self, dataset):
-        selector = VarianceThreshold(threshold = .02)
-        selector.fit(dataset)
-        return selector.get_support(indices=True)
-    
     def fit_gaussian(self, dataset):
         """ Assumes dataset is shape (num points, num features)"""
         mean = np.mean(dataset, axis=0)
         covariance = np.cov(dataset.T) # takes in shape (num features, num points)
         return lambda x: multivariate_normal.pdf(x, mean=mean, cov=covariance)
     
-    def polynomial_svm(self, dataset, labels):
-        svm = SVC(kernel='poly', degree=2, gamma='scale', C=1000)
+    def polynomial_svm(self, dataset, labels, svm_degree=2):
+        svm = SVC(kernel='poly', degree=svm_degree, gamma='scale', C=1000, probability=False)
         svm.fit(dataset, labels)
         accuracy = svm.score(dataset, labels)
         return svm, accuracy, svm.get_params(deep=False)
@@ -354,70 +269,43 @@ class Analysis(object):
     
     def _process_data(self):
         # Return successful and failures for each of the primitives
-        success = {}
-        success_prime = {}
-        fail = {}
-        fail_prime = {}
+        success = None
+        fail = None
 
-        success_start = {}
-        fail_start = {}
-
-        total_time = {}
-
-        success_rewards = []
-        fail_rewards = []
-        for i, key in enumerate(self.curr_path.keys()):
-            path = self.curr_path[key]
-            with open(path, "rb") as fp:
-                data = pickle.load(fp)
-            self.id_to_primitive[i] = key
-            self.primitive_to_id[key] = i
-            for rollout in data:
-                if type(rollout[-1]) == int:
-                    achieved = rollout[-1]
-                    states = rollout[:-1]
-                    result = states[-1]
-                elif type(rollout[-2]) == int:
-                    achieved = rollout[-2]
-                    time = rollout[-1]
-                    states = rollout[:-2]
-                    result = states[-1]
-                    if achieved:
-                        curr_time = total_time.get(key, [])
-                        curr_time.append(time)
-                        total_time[key] = curr_time
+        path = self.curr_path
+        with open(path, "rb") as fp:
+            data = pickle.load(fp)
+        num_success_episodes = 0
+        total_episodes = 0
+        for rollout in data:
+            if type(rollout[-1]) == int:
+                achieved = rollout[-1]
+                states = rollout[:-1]
+                result = states[-1]
+            elif type(rollout[-2]) == int:
+                achieved = rollout[-2]
+                time = rollout[-1]
+                states = rollout[:-2]
+                result = states[-1]
+            else:
+                continue
+            num_success_episodes += int(achieved)
+            total_episodes += 1
+            if achieved:
+                if type(success) != np.ndarray:
+                    success = np.vstack(states)
                 else:
-                    continue
-
-                if achieved:
-                    curr_success = success.get(key, np.zeros((1, states[0].size)))
-                    curr_prime = success_prime.get(key, np.zeros((1, states[0].size)))
-                    success[key] = np.vstack((curr_success, np.vstack(states)))
-                    results = np.vstack([result for i in range(len(states))])
-                    success_prime[key] = np.vstack((curr_prime, results))
-
-                    curr_success = success_start.get(key, np.zeros((1, states[0].size)))
-                    success_start[key] = np.vstack((curr_success, states[0]))
-
-                    success_rewards.extend(self.get_accumulated_rewards_success(len(states)))
+                    success = np.vstack((success, np.vstack(states)))
+            else:
+                if type(fail) != np.ndarray:
+                    fail = np.vstack(states)
                 else:
-                    curr_fail = fail.get(key, np.zeros((1, states[0].size)))
-                    curr_prime = fail_prime.get(key, np.zeros((1, states[0].size)))
-                    fail[key] = np.vstack((curr_fail, states))
-                    results = np.vstack([result for i in range(len(states))])
-                    fail_prime[key] = np.vstack((curr_prime, results))
+                    fail = np.vstack((fail, np.vstack(states)))
+        print(' Number of successful episodes: ', num_success_episodes, '   Total Episodes: ', total_episodes)
+        print(' Success rate by episode: ', float(num_success_episodes) / total_episodes)
+        print(' Number success datapoints: ', success.shape[0], '  Number of failure datapoints: ', fail.shape[0])
 
-                    curr_fail = fail_start.get(key, np.zeros((1, states[0].size)))
-                    fail_start[key] = np.vstack((curr_fail, states[0]))
-                    fail_rewards.extend(self.get_accumulated_rewards_fail(len(states)))
-        for key in self.curr_path.keys():
-            success[key] = success[key][1:, :]
-            success_prime[key] = success_prime[key][1:, :]
-            fail[key] = fail[key][1:, :]
-            fail_prime[key] = fail_prime[key][1:, :]
-            success_start[key] = success_start[key][1:, :]
-            fail_start[key] = fail_start[key][1:, :]
-        return success, success_prime, fail, fail_prime, success_start, fail_start, total_time, success_rewards, fail_rewards
+        return success, fail
     
     def get_accumulated_rewards_success(self, length):
         return [5 - (i * .1) for i in range(length)]

@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
 from task import Task, unitVector, dot, vector
+from task import ori as orientation
 from task import distance as dist
 import numpy as np 
 import math
@@ -10,7 +11,7 @@ import torch.nn as nn
 import vrep
 import time
 from std_msgs.msg import String, Int8, Int16
-from hierarchyTask import HierarchyTask
+from hierarchical_controller import HierarchicalController
 from geometry_msgs.msg import Vector3
 from matplotlib import pyplot as plt  
 import pickle
@@ -21,15 +22,18 @@ class Hierarchy_MBRL_Task(Task):
         super(Hierarchy_MBRL_Task, self).__init__()
         self.prev = {"S": None, "A": None}
         self.fail = rospy.Publisher("/restart", Int8, queue_size = 1)
-        rospy.Subscriber("/simulation", String, self.receive_simulation_description, queue_size = 1)
-        rospy.Subscriber("/starting", Int16, self.receive_starting_cue, queue_size = 1)
-        self.action_map = {0: 'APPROACH', 1: 'ANGLE_TOWARDS', 2: 'PUSH_IN', 3: 'ALIGN_Y',
-                           4: 'PUSH_LEFT', 5: 'PUSH_RIGHT', 6: 'MOVE_BACK', 7:'ANGLE_TOWARDS_GOAL'}
+        rospy.Subscriber("/simulation", String, self.receive_simulation_description, queue_size=1)
+        rospy.Subscriber("/starting", Int16, self.receive_starting_cue, queue_size=1)
+        # ordered such that non-box policy simply selects actions 0 to 3
+        self.action_map = {0: 'ANGLE_TOWARDS_GOAL', 1: 'PUSH_IN', 2: 'MOVE_BACK', 3: 'ALIGN_Y',
+                           4: 'PUSH_LEFT', 5: 'PUSH_RIGHT', 6: 'APPROACH', 7: 'ANGLE_TOWARDS'}
 
-        self.s_n = 9
+        self.s_n = 10
         self.currReward = 0
         self.rewards = []
         self.testing_rewards = []
+
+        self.has_box_in_simulation = True
 
         self.curr_rollout = []
         self.data = []
@@ -41,8 +45,9 @@ class Hierarchy_MBRL_Task(Task):
 
         self.counter = 0
         self.period = 50
-        self.mode =  '' # 'GET_STATE_DATA' #
-        self.controller = HierarchyTask()
+        self.mode = '' #'GET_STATE_DATA'#
+        self.num_gather_data = 10000  # how many data points gather for classification
+        self.controller = HierarchicalController()
         self.simulation_name = None
         self.prev_action_was_valid = True
    
@@ -62,7 +67,6 @@ class Hierarchy_MBRL_Task(Task):
         else:
             ret = self.prev['A'][0]
         action = self.action_map[ret]
-        self.controller.goal = s.ravel()[:2]
         action = self.controller.getPrimitive(self.controller.feature_2_task_state(s.ravel()), action)
         msg.x, msg.y = (action[0], action[1])
         self.pubs[self.name].publish(msg)
@@ -93,21 +97,60 @@ class Hierarchy_MBRL_Task(Task):
         s = s.ravel()
         succeeded = self.succeeded(s)
         done = self.decide_to_restart(s)
+
         if succeeded:
             if self.simulation_name == 'elevated_scene':
-                return 10 - dist(s[:3], s[5:8]) * 5
+                return 5 - dist(s[:2], s[5:7]) * 5
             if self.simulation_name == 'flat_scene':
-                return 10 - abs(self.box_ori_global) * 3
+                return 5 - abs(self.box_ori_global) * 3
             if self.simulation_name == 'slope_scene':
-                return 10 - abs(self.box_ori_global) * 3
+                return 5 - abs(self.box_ori_global) * 3
         if done and not succeeded:
-            return -3
+            return -5
         else:
-            if self.prev_action_was_valid:
+            if type(self.prev["S"]) != np.ndarray:
+                return 0
+            previous_local_state = self.prev['S'].ravel()
+            previous_distance = dist(previous_local_state[:3], previous_local_state[5: 8])
+            curr_distance = dist(s[:3], s[5: 8])
+            d_reward = previous_distance - curr_distance
+
+            prev_ori = abs(previous_local_state[4] - self.get_goal_angle(previous_local_state))
+            curr_ori = abs(s[4] - self.get_goal_angle(s))
+            ori_reward = prev_ori - curr_ori if curr_distance > 1 else 0  # if to prevent overshoot
+
+            """prev_box_from_hole = previous_local_state[:2] - previous_local_state[5:7]
+            hole = s[5:7]
+            aligned = hole - dot(hole, unitVector(prev_box_from_hole)) * unitVector(prev_box_from_hole)
+            prev_align = dist(np.zeros(2), aligned)
+            box_from_hole = s[:2] - s[5:7]
+            hole = s[5:7]
+            aligned = hole - dot(hole, unitVector(box_from_hole)) * unitVector(box_from_hole)
+            curr_align = dist(np.zeros(2), aligned)
+            align_reward = prev_align - curr_align"""
+
+            """prev_distance_to_box = dist(np.zeros(3), previous_local_state[:3])
+            distance_to_box = dist(np.zeros(3), s[:3])
+            box_reward = prev_distance_to_box - distance_to_box"""
+
+            """if self.prev_action_was_valid:
                 return -.1
             else:
-                return -.2
-    
+                return -.2"""
+            return 5 * np.round(.75 * d_reward + .25 * ori_reward, 2) - .2
+
+    def get_goal_angle(self, state):
+        box_location = state[:2]
+        hole_location = state[5:7]
+        box_to_hole = unitVector(hole_location - box_location)
+        ori = orientation(box_to_hole)  # this returns the inverse tangent of y / x. Maps -pi/2 to pi/2
+        # Must map to -pi to pi for v-rep comparison
+        relative_y = box_to_hole[1]
+        relative_x = box_to_hole[0]
+        buff = (-np.pi if relative_y < 0 else np.pi) if relative_x < 0 else 0  # since we want to map -pi to pi
+        ori = ori + buff
+        return ori
+
     def receive_starting_cue(self, msg):
         self.curr_episode = (msg.data, False)
     
@@ -148,8 +191,8 @@ class Hierarchy_MBRL_Task(Task):
 
         succeeded = self.succeeded(s.ravel())
         restarting = self.decide_to_restart(s.ravel())
-        self.done = restarting or succeeded
 
+        self.done = restarting or succeeded
         reward = self.reward_function(s)
         if not self.curr_episode[1]:
             if not self.done:
@@ -158,7 +201,13 @@ class Hierarchy_MBRL_Task(Task):
                     self.counter = self.period
                     action_index, action_control = (self.sendAction(s, changeAction))
                     if self.isValidAction(adjusted_state_for_controls, self.action_map[action_index]):
-                        self.curr_rollout.append(s.ravel())
+                        if len(self.curr_rollout) > 0:
+                            if all([dist(r, s.ravel()) > .3 for r in self.curr_rollout[-5:]]):
+                                self.curr_rollout.append(s.ravel())
+                        else:
+                            self.curr_rollout.append(s.ravel())
+                        if self.mode == 'GET_STATE_DATA':
+                            print('Length data for collection: ', len(self.curr_rollout) + self.curr_size)
                     if type(self.prev["S"]) == np.ndarray and not self.agent.testing_to_record_progress:
                         print(self.action_map[self.prev['A'][0]], reward)
                         self.agent.store(self.prev['S'], np.array(self.prev["A"][0]), reward, s, 0, self.done, self.prev['A'][0])
@@ -176,7 +225,7 @@ class Hierarchy_MBRL_Task(Task):
                     prev_s = self.prev['S']
                     if not self.agent.testing_to_record_progress:
                         self.agent.store(prev_s, np.array(self.prev["A"][0]), reward, s, 0, self.done, self.prev['A'][0])
-                        print('Last transition recorded')
+                        print('Last transition recorded with reward: ', reward)
 
                 self.currReward += reward   
                 if succeeded:
@@ -188,21 +237,29 @@ class Hierarchy_MBRL_Task(Task):
         return 
     
     def succeeded(self, s):
-        if self.simulation_name == 'elevated_scene':
-            return dist(s[:3], s[5:8]) < .5 and self.box_z_global < .2 and self.bot_z_global > .3
-        if self.simulation_name == 'flat_scene':
-            return dist(s[:3], s[5:8]) < .5
-        if self.simulation_name == 'slope_scene':
-            return dist(s[:3], s[5:8]) < .5
+        assert type(self.simulation_name) == str
+        if self.has_box_in_simulation:
+            if self.simulation_name == 'elevated_scene':
+                return dist(s[:2], s[5:7]) < .5 and self.box_z_global < .2 and self.bot_z_global > .3
+            if self.simulation_name == 'flat_scene':
+                return dist(s[:3], s[5:8]) < .5
+            if self.simulation_name == 'slope_scene':
+                return dist(s[:3], s[5:8]) < .3
+        else:
+            return dist(s[5: 8], np.zeros(3)) < .2
 
     def decide_to_restart(self, s):
+        assert type(self.simulation_name) == str
         # if far away from box, far away from goal, box dropped, or bot dropped
-        if self.simulation_name == 'elevated_scene':
-            return dist(s[:3], np.zeros(3)) > 4 or dist(s[5:8], np.zeros(3)) > 3.5 or self.box_z_global < .2 or self.bot_z_global < .3 or self.currReward <= -20
-        if self.simulation_name == 'flat_scene':
-            return dist(s[:3], np.zeros(3)) > 4 or dist(s[5:8], np.zeros(3)) > 4 or abs(self.box_y_global) > .8 or self.currReward <= -20
-        if self.simulation_name == 'slope_scene':
-            return abs(self.box_ori_global) > 1 or dist(s[:3], np.zeros(3)) > 3 or self.currReward <= -20
+        if self.has_box_in_simulation:
+            if self.simulation_name == 'elevated_scene':
+                return dist(s[:3], np.zeros(3)) > 4 or dist(s[5:8], np.zeros(3)) > 5 or self.box_z_global < .2 or self.bot_z_global < .3
+            if self.simulation_name == 'flat_scene':
+                return dist(s[:3], np.zeros(3)) > 5 or dist(s[5:8], np.zeros(3)) > 5 or abs(self.box_y_global) > 5
+            if self.simulation_name == 'slope_scene':
+                return abs(self.box_ori_global) > 1 or dist(s[:3], np.zeros(3)) > 5 or dist(s[:3], s[5:8]) > 10
+        else:
+            return False
         
     
     def restartProtocol(self, restart, succeeded = False):
@@ -227,7 +284,7 @@ class Hierarchy_MBRL_Task(Task):
                     self.curr_rollout.append(time_execute)
                     self.append_states()
                     print(' LENGTH OF DATA: ', self.curr_size)
-                    if self.curr_size > 5000:
+                    if self.curr_size > self.num_gather_data:
                         self.agent.stop = True
             for k in self.prev.keys():
                 self.prev[k] = None

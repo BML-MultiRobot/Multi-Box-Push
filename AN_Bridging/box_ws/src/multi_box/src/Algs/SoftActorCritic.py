@@ -10,6 +10,7 @@ from geometry_msgs.msg import Vector3
 import vrep
 import matplotlib.pyplot as plt
 import torch.optim as optim
+from Buffers.CounterFactualBuffer import Memory
 
 from Networks.network import Network
 from Networks.softNetwork import SoftNetwork
@@ -18,6 +19,7 @@ from Buffers.CounterFactualBuffer import Memory
 
 cuda_avail = torch.cuda.is_available()
 device = torch.device("cuda" if cuda_avail else "cpu")
+
 
 """ Soft actor critic implementation"""
 
@@ -29,9 +31,8 @@ class SAC(Agent):
         self.qPars      = params['qPars']
         self.qTrain     = params['qTrain']
         if self.trainMode:
-            self.QNet = Network(self.qPars, self.qTrain).to(device)
-            self.VNet = Network(self.vPars, self.vTrain).to(device)
-            self.VTar = Network(self.vPars, self.vTrain).to(device)
+            self.QNets = [Network(self.qPars, self.qTrain).to(device) for i in range(2)]
+            self.QTargets = [Network(self.qPars, self.qTrain).to(device) for i in range(2)]
             self.policyNet = SoftNetwork(self.aPars, self.aTrain).to(device)
         else:
             print('Not implemented')
@@ -42,7 +43,7 @@ class SAC(Agent):
         self.expSize    = self.vTrain['buffer']
         self.actions    = self.aPars['neurons'][-1]
         self.state      = self.aPars['neurons'][0]
-        self.exp        = None  # NOTE: replace this with a proper experience buffer if planning on using
+        self.exp        = Memory(size = self.expSize)
 
         task.initAgent(self)
     
@@ -50,16 +51,20 @@ class SAC(Agent):
             x = 1+1
         task.postTraining()
 
+    def store(self, s, a, r, sprime, aprime, done):
+        self.exp.push(s, a, r, 1-done, aprime, sprime)
+
     def load_nets(self):
         pass
-    
+
     def saveModel(self):
+        torch.save(self.policyNet.state_dict(),
+                   '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/hierarchical_sac_policy.txt')
         pass
     
     def get_action(self, s):
-        action, _ , _, _, _= self.policyNet(torch.FloatTensor(s))
-        action = np.ravel(action.detach().numpy())
-        return action
+        distribution = self.policyNet(torch.FloatTensor(s))
+        return distribution.sample().detach().numpy()
 
     def send_to_device(self, s, a, r, next_s, d):
         s = torch.FloatTensor(s).to(device)
@@ -70,33 +75,32 @@ class SAC(Agent):
         return s, a, r, next_s, d
         
     def train(self):
-        if len(self.exp) > 750:
-            s, a, r, next_s, d = self.exp.sample_batch(self.batch_size)
+        if len(self.exp) > 1000:
+            # NOTE: Tailored to discrete action settings
+            s, a, r, masks, _, next_s, _, _, _ = self.exp.sample(batch=self.batch_size)
+            d = 1 - masks
             s, a, r, next_s, d = self.send_to_device(s, a, r, next_s, d)
 
-            q = self.QNet(torch.cat([s, a], dim = 1))
-            v = self.VNet(s)
-            new_a, log_prob, z, mean, log_std = self.policyNet(s)
+            q_over_actions = [net(s) for net in self.QNets]
+            next_action_distribution = self.policyNet(next_s)
+            next_actions = self.get_action(next_s)
+            q_targets = [torch.gather(net(next_s), 1, torch.LongTensor(next_actions).unsqueeze(1)) for net in self.QTargets]
+            q_targets = torch.min(q_targets[0], q_targets[1])
 
-            target_v = self.VTar(next_s)
+            next_distribution = self.policyNet(next_s)
+            next_v = next_distribution @ (q_targets - self.alpha * torch.log(next_action_distribution))
 
-            next_q = r + (1 - d) * self.discount * target_v
-            q_loss = self.QNet.get_loss(q, next_q.detach())
+            next_q = r + (1 - d) * self.discount * next_v
+            q_loss = [net.get_loss(torch.gather(q_over_actions[i], 1, torch.LongTensor(a).unsqueeze(1)), next_q.detach()) for i, net in enumerate(self.QNets)]
+            q_loss = sum(q_loss)
 
-            new_q = self.QNet(torch.cat([s, new_a], dim=1))
-            next_v = new_q - log_prob * self.alpha
-            v_loss = self.VNet.get_loss(v, next_v.detach())
+            action_distribution = self.policyNet(s)
+            new_a = action_distribution.sample()
+            log_prob = action_distribution.log_prob(new_a)
 
-            target = new_q - v
-            actor_loss = (log_prob * (log_prob*self.alpha - target).detach()).mean()
-
-            mean_loss = 1e-3 * mean.pow(2).mean()
-            std_loss = 1e-3 * log_std.pow(2).mean()
-            actor_loss += mean_loss + std_loss
-
-            self.VNet.optimizer.zero_grad()
-            v_loss.backward()
-            self.VNet.optimizer.step()
+            minimized_q = torch.min(q_over_actions[0], q_over_actions[1])
+            target = minimized_q - (action_distribution @ minimized_q)
+            actor_loss = log_prob * self.alpha * torch.log(action_distribution) - (action_distribution @ target)
 
             self.QNet.optimizer.zero_grad()
             q_loss.backward()

@@ -25,7 +25,7 @@ from sklearn.gaussian_process.kernels import RBF, WhiteKernel, RationalQuadratic
 from scipy.stats import chi, multivariate_normal, mode
 from data_analysis import Analysis
 from box_slope_task import BoxSlopeTask
-from hierarchyTask import HierarchyTask
+from hierarchical_controller import HierarchicalController
 
 load_paths = {
 }

@@ -8,9 +8,9 @@ import vrep
 import time
 
 VREP_SCENES = [('elevated_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_simulation.ttt'),
-               ('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt'),
-               ('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt')]
-
+                ('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt'),
+                ('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt')]
+"""VREP_SCENES = [('stigmergic_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/stigmergic_simulation1.ttt')]"""
 
 class Manager():
     def __init__(self):
@@ -34,7 +34,7 @@ class Manager():
                 #time.sleep(60)
             else:
                 time.sleep(3)
-            simulation_index = np.random.randint(len(VREP_SCENES))
+            simulation_index = np.random.choice(range(len(VREP_SCENES)), p=[.5, .25, .25])
             sim_name, sim_path = VREP_SCENES[simulation_index]
             msg = String()
             msg.data = sim_name
@@ -49,7 +49,7 @@ class Manager():
             start = time.time()
             self.restart = False
             elapsed = 0
-            while(not self.restart and elapsed < maxTime):
+            while (not self.restart and elapsed < maxTime):
                 curr = time.time()
                 elapsed = curr - start
             vrep.simxStopSimulation(clientID,vrep.simx_opmode_oneshot)
@@ -75,8 +75,8 @@ class Manager():
         return
 
 
-episodes = 740  # 1600
-maxTime = 21  # 40 with visual. 21 for all...MBRL has 40 steps before timing out on first episode
+episodes = 800 # 700  # 1600
+maxTime = 25 # 25  # 40 with visual. 21 for all...MBRL has 40 steps before timing out on first episode
 
 
 if __name__ == "__main__":

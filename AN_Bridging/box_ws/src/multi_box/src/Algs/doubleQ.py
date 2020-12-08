@@ -36,24 +36,17 @@ class DoubleQ(Agent):
                     target_param.data.copy_(param.data)
         else:
             self.valueNet = Network(self.vPars, self.vTrain)
-            paths = ['/home/jimmy/Documents/Research/AN_Bridging/model_training_data/hierarchical_q_policy2.txt']
-            if not load_path:
-                self.valueNet = []
-                for path in paths:
-                    self.valueNet.append(Network(self.vPars, self.vTrain))
-                    self.valueNet[-1].load_state_dict(torch.load(path))
-            else:
-                self.valueNet.load_state_dict(torch.load(load_path))
+            self.valueNet.load_state_dict(torch.load(load_path))
         self.out_n = self.vPars['neurons'][-1]
         self.replaceCounter = 0
         self.valueLoss = []
         self.avgLoss = 0
         self.expSize =self.vTrain['buffer']
         self.exp = Memory(size = self.expSize)
+        self.beta = self.vPars['beta']
 
         self.priority = self.vTrain['priority']
         self.priorities = []
-        self.beta = .5
         self.alpha = .7
 
         self.double = self.vTrain['double']
@@ -73,7 +66,7 @@ class DoubleQ(Agent):
     def saveModel(self):
         torch.save(self.valueNet.state_dict(), '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/hierarchical_q_policy2.txt')
         pass
-    
+
     def store(self, s, a, r, sprime, aprime, done):
         self.exp.push(s, a, r, 1-done, aprime, sprime)
         if len(self.priorities) < self.expSize:
@@ -98,12 +91,14 @@ class DoubleQ(Agent):
             index = np.random.randint(self.out_n)
         else:
             q = self.get_q(s)
-            print(q)
+            # print(q)
             if probabilistic:
                 q = q.numpy()
-                probs = np.exp(q)
+                q = q - np.max(q)
+                probs = np.exp(q * self.beta)
                 probs = probs / np.sum(probs)
                 index = np.random.choice(q.size, p=probs.ravel())
+                # print('probability chosen ', probs.ravel()[index])
             else:
                 index = np.argmax(q.numpy())  
         self.explore = max(0, self.explore * .9997)
@@ -146,9 +141,9 @@ class DoubleQ(Agent):
                 val_loss = sum([w * e for w,e in zip(weights, errors)])
                     
             else:
-                states, actions, rewards, masks, _ , nextStates, _,_,_ = self.exp.sample(batch = self.batch_size)
+                states, actions, rewards, masks, _, nextStates, _, _, _ = self.exp.sample(batch=self.batch_size)
 
-                if self.replaceCounter % 200 == 0:
+                if self.replaceCounter % 300 == 0:
                     self.tarNet.load_state_dict(self.valueNet.state_dict())
                     self.replaceCounter = 0
 

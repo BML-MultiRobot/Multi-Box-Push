@@ -28,7 +28,7 @@ class Model(nn.Module):
         self.one_hot_flag = train_params['one_hot']
         self.createFeatures()
 
-        self.transitions = np.zeros((1, 20))
+        self.transitions = []
         self.size = 1
 
         self.optimizer =  optim.Adam(super(Model, self).parameters(), lr=self.lr, weight_decay = 0.01)
@@ -84,7 +84,10 @@ class Model(nn.Module):
         return None, mu.detach().numpy(), std.detach().numpy()'''
     
     def store(self, feature, action, new_feature):
-        self.transitions = np.vstack((self.transitions, np.hstack((feature, action.reshape(feature.shape[0], -1), new_feature))))
+        if type(self.transitions) != np.ndarray:
+            self.transitions = np.hstack((feature, action.reshape(feature.shape[0], -1), new_feature))
+        else:
+            self.transitions = np.vstack((self.transitions, np.hstack((feature, action.reshape(feature.shape[0], -1), new_feature))))
         self.size += feature.shape[0]
         if self.size > self.max_size:
             self.transitions = self.transitions[1:, :]
@@ -97,7 +100,7 @@ class Model(nn.Module):
 
     def train(self):
         # probabilistic gaussian for new feature predictor
-        indices = np.random.choice(self.size - 1, self.batch_size) + 1 # NOTE: We don't include the first index
+        indices = np.random.choice(self.size, self.batch_size)
         batch = self.transitions[indices]
 
         if self.one_hot_flag:

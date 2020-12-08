@@ -2,7 +2,7 @@
 
 import numpy as np
 class Task(object):
-    def __init__(self, take_states=True):
+    def __init__(self):
         self.init = False
         
     def initAgent(self, agent):
@@ -31,6 +31,10 @@ class Task(object):
 
 def vector(ori):
     return np.array([np.cos(ori), np.sin(ori)])
+
+def ori(vector):
+    ratio_y_x = vector[1] / vector[0]
+    return np.arctan(ratio_y_x)
 
 def distance(point1, point2):
     assert point1.size == point2.size
