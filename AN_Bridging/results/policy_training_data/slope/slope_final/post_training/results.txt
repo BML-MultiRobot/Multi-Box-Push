@@ -1,0 +1,2 @@
+mean reward: 3.98657
+success proportion: .93

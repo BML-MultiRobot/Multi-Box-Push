@@ -1,0 +1,97 @@
+    valPars = {
+                'neurons':      (18, 400, 400, 400, 9), # 5 box-related state, 4 goal-related state, 8 action one hot, 1 indicator
+                'act':          ['F.leaky_relu','F.leaky_relu', 'F.leaky_relu'],
+                'mu':           torch.zeros(18),
+                'std':          torch.ones(18),
+                'trainMode':    False, # Make sure both value and policy are set to the same thing
+                'load':         False, 
+                'dual':         False,
+                'u_n':          8,
+                's_n':          8,
+                'dropout':      0
+                } 
+    valTrain = {
+                'batch':        256, #512 used to be...but might be too slow 
+                'lr':           3e-4, 
+                'noise':        .05,
+                'buffer':       10000,
+                'gamma':        0,  # Tune the policy below
+                'double':       True,
+                'pretrain':     False, 
+                'one_hot':      True,
+                'min_explore':  .2,
+                'explore':      .7,  # this was changed to .5 for MB
+                'explore_decay': .9998,
+                }
+    
+    policyPars = {
+                'neurons':      (10, 200, 200, 200, 8),  # 5 box-related state, 4 goal-related state, 8 controls
+                'act':          ['F.leaky_relu', 'F.leaky_relu', 'F.leaky_relu'],
+                'mu':           torch.zeros(10),
+                'std':          torch.ones(10),
+                'trainMode':    False,  # Make sure both value and policy are set to the same thing
+                'load':         False, 
+                'dual':         False,
+                'beta':         8  # boltzmann. Increase for more certainty when making decisions
+                } 
+    policyTrain = {
+                'batch':        128,  # used to be 256
+                'lr':           3e-4,
+                'buffer':       10000,
+                'gamma':        .975,
+                'explore':      0,  # Don't change this. Tune the exploration up top
+                'double':       True,
+                'noise':        0,
+                'priority':     False,
+                'update_target_network_every': 300,
+                'train_every_steps': 1,  # note: ratio of env steps to gradient steps is always 1
+                'explore_steps': 1000,
+                }
+
+    def reward_function(self, s):
+        s = s.ravel()
+        succeeded = self.succeeded(s)
+        _, done = self.decide_to_restart(s)
+
+        if succeeded:
+            if self.simulation_name == 'elevated_scene':
+                return 5 - dist(s[:2], s[5:7])
+            if self.simulation_name == 'flat_scene':
+                return 5 - abs(self.box_ori_global) * 3
+            if self.simulation_name == 'slope_scene':
+                return 5 - abs(self.box_ori_global) * 3
+        if done and not succeeded:
+            if self.simulation_name == 'elevated_scene' and (self.box_z_global < .2 and self.bot_z_global > .2):
+                return 0
+            else:
+                return -5
+        else:
+            if type(self.prev["S"]) != np.ndarray:
+                return 0
+            previous_local_state = self.prev['S'].ravel()
+
+            dist_state = 2 if self.simulation_name == 'elevated_scene' else 3
+            previous_distance = dist(previous_local_state[0: dist_state], previous_local_state[5: 5 + dist_state])
+            curr_distance = dist(s[:dist_state], s[5: 5 + dist_state])
+            d_reward = previous_distance - curr_distance
+
+            prev_ori = self.get_goal_angle(previous_local_state)
+            curr_ori = self.get_goal_angle(s, display=True)
+            ori_reward = prev_ori - curr_ori if abs(s[3]) < .01 and curr_distance > .5 else 0  # this is to keep certain calculations correct
+
+            if self.prev_action_was_valid:
+                return 3 * np.round(.5 * np.round(d_reward, 2) + .5 * np.round(ori_reward, 2), 3) - .1
+            else:
+                return -.3
+
+        self.travel_gain = 2.5  
+        self.align_gain = 3
+        self.rotate_gain = 3
+        self.x_contact = 0
+        self.contact = {'left': .6, 'right': -.6}
+
+period = 50
+max num steps = 50
+
+
+

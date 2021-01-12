@@ -1,0 +1,3 @@
+mean reward: 4.77179
+success proportion: .97
+total episodes [not including exploration]: ~270
