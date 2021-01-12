@@ -17,7 +17,7 @@ from itertools import groupby
 import networkx as nx
 import numpy as np
 
-path = '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/Pure_Q_With_Reward_Shaping/Trial_8_Solid/Pure_MFRL_state_data.txt'
+path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/'
 
 
 class Graph_Map_Manager(object):

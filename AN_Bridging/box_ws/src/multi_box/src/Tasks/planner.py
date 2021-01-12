@@ -2,30 +2,15 @@
 
 from task import Task, unitVector, dot, vector
 from task import distance as dist
-import numpy as np 
-import math
+import numpy as np
 import rospy
-import torch 
-import torch.nn as nn
 import vrep
-import time
-import copy
 import sys
-from Algs.doubleQ import DoubleQ
 from std_msgs.msg import String, Int8
 from geometry_msgs.msg import Vector3
-from matplotlib import pyplot as plt
-from probabilisticModel import Model
 from Algs.doubleQ import DoubleQ
 from collections import OrderedDict
-from sklearn.neighbors import KNeighborsClassifier as KNN
-from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis as QDA
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, WhiteKernel, RationalQuadratic
-from scipy.stats import chi, multivariate_normal, mode
 from data_analysis import Analysis
-from box_slope_task import BoxSlopeTask
-from hierarchical_controller import HierarchicalController
 
 load_paths = {
 }

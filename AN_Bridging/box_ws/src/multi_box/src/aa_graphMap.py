@@ -73,6 +73,8 @@ class StigmergicGraphVREP(StigmergicGraph):
             if box_node in curr_node.neighbors:  # Pushing directly to hole
                 path = self.get_path_to_hole(box_node, agent.target_node)[1:]
                 agent_new_location = path[0]
+                # TODO: Bug here. Only decay when you first claim it
+                # TODO: Also, when finished pushing box into hole, set agent location to prev node
                 self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)] *= aa_graphMap_node_simulation.B_preference_decay
             else:
                 """ Option 4: """

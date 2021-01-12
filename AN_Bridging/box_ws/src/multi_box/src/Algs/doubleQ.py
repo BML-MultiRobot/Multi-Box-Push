@@ -2,21 +2,10 @@
 
 import numpy as np 
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-import math 
-import rospy
-from std_msgs.msg import String, Int8
-from geometry_msgs.msg import Vector3
-import vrep
-import matplotlib.pyplot as plt
+import math
 
-from torch.distributions import Categorical
 from Networks.network import Network
 from agent import Agent
-from Networks.dualNetwork import DualNetwork
-from utils import positiveWeightSampling
 from Buffers.CounterFactualBuffer import Memory
 
 '''Double DQN with priority sampling based on TD error. Possible to have dual networks for advantage and value'''
@@ -50,6 +39,7 @@ class DoubleQ(Agent):
         self.alpha = .7
 
         self.double = self.vTrain['double']
+        self.update_target_network = self.vTrain['update_target_network_every']
         if 'noise' in self.vTrain:
             self.noise = self.vTrain['noise']
         else:
@@ -91,7 +81,7 @@ class DoubleQ(Agent):
             index = np.random.randint(self.out_n)
         else:
             q = self.get_q(s)
-            # print(q)
+            print(q)
             if probabilistic:
                 q = q.numpy()
                 q = q - np.max(q)
@@ -101,7 +91,7 @@ class DoubleQ(Agent):
                 # print('probability chosen ', probs.ravel()[index])
             else:
                 index = np.argmax(q.numpy())  
-        self.explore = max(0, self.explore * .9997)
+        self.explore = max(.2, self.explore * .9997)
         return index
     
     def get_q_and_q_tar(self, states, actions, nextStates, rewards, masks):
@@ -143,7 +133,7 @@ class DoubleQ(Agent):
             else:
                 states, actions, rewards, masks, _, nextStates, _, _, _ = self.exp.sample(batch=self.batch_size)
 
-                if self.replaceCounter % 300 == 0:
+                if self.replaceCounter % self.update_target_network == 0:
                     self.tarNet.load_state_dict(self.valueNet.state_dict())
                     self.replaceCounter = 0
 

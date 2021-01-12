@@ -6,13 +6,11 @@ import torch
 import rospy
 from collections import OrderedDict
 
-from Algs.AutoDecompose import Decompose 
 from Tasks.decomposeTask import DecomposeTask
 from Algs.doubleQ import DoubleQ
-from Tasks.omni_box_slope_task import OmniBoxSlopeTask
 from Tasks.hierarchy_MBRL_task import Hierarchy_MBRL_Task
 from Tasks.planner import Planner
-# from aa_graphMap_node_simulation import stigmergic_main
+from aa_graphMap_node_simulation import stigmergic_main
 # from aa_graph_map_manager import Graph_Map_Manager
 from Algs.hierarchical_MBRL import Hierarchical_MBRL
 
@@ -28,7 +26,7 @@ algs = {
     6: 'STIGMERGIC',
     7: 'TEST'
 }
-ALGORITHM = 5
+ALGORITHM = 6
 description = algs[ALGORITHM]
 rospy.init_node('Dummy', anonymous=True)
 
@@ -131,7 +129,7 @@ if description == 'MBRL':
                 'act':          ['F.leaky_relu','F.leaky_relu', 'F.leaky_relu'],
                 'mu':           torch.zeros(18),
                 'std':          torch.ones(18),
-                'trainMode':    True, # Make sure both value and policy are set to the same thing
+                'trainMode':    False, # Make sure both value and policy are set to the same thing
                 'load':         False, 
                 'dual':         False,
                 'u_n':          8,
@@ -144,31 +142,35 @@ if description == 'MBRL':
                 'noise':        .05,
                 'buffer':       10000,
                 'gamma':        0,  # Tune the policy below
-                'explore':      .7,  # this was changed to .5 for MB
                 'double':       True,
-                'pretrain':     False, 
-                'one_hot':      True
+                'one_hot':      True,
+                'min_explore':  .2,
+                'explore':      .7,  # this was changed to .5 for MB
+                'explore_decay': .9998,
                 }
     
     policyPars = {
-                'neurons':      (10, 250, 250, 250, 8),  # 5 box-related state, 4 goal-related state, 8 controls
+                'neurons':      (10, 200, 200, 200, 8),  # 5 box-related state, 4 goal-related state, 8 controls
                 'act':          ['F.leaky_relu', 'F.leaky_relu', 'F.leaky_relu'],
                 'mu':           torch.zeros(10),
                 'std':          torch.ones(10),
-                'trainMode':    True,  # Make sure both value and policy are set to the same thing
+                'trainMode':    False,  # Make sure both value and policy are set to the same thing
                 'load':         False, 
                 'dual':         False,
-                'beta':         12  # boltzmann. Increase for more certainty when making decisions
+                'beta':         8  # boltzmann. Increase for more certainty when making decisions
                 } 
     policyTrain = {
-                'batch':        256,  # used to be 256
-                'lr':           3e-4, 
+                'batch':        128,  # used to be 256
+                'lr':           3e-4,
                 'buffer':       10000,
                 'gamma':        .975,
                 'explore':      0,  # Don't change this. Tune the exploration up top
                 'double':       True,
                 'noise':        0,
-                'priority':     False
+                'priority':     False,
+                'update_target_network_every': 300,
+                'train_every_steps': 1,  # note: ratio of env steps to gradient steps is always 1
+                'explore_steps': 5000,
                 }
     doubleQPars = {'valPars': policyPars, 'valTrain': policyTrain, 'agents': agents}
     params = {"valPars": valPars, "valTrain": valTrain, 'doubleQ_params': doubleQPars, "agents": agents}
@@ -186,31 +188,31 @@ if description == 'STIGMERGIC':
     """
 
     # Basic environment. 1 box. 2 holes (1 invalid). 4 nodes.
-    """
+
     nodes = [(0, 0, 1, -1), (0, 1, -1, 0), (1, 0, 0, 0), (1, 1, 1, -1)]
     inclusions = []
     exclusions = [(1, 2), (0, 3)]
     box = [(0, 0, 1)]
     robot = [(0, 0)]
-    goal = 3 """
+    goal = 3
 
     # Basic environment. 2 boxes (1 invalid). 1 hole. 5 nodes.
-    """
-    nodes = [(0, 0, 1, -1), (0, 1, 1, -1), (1, 0, 1, -1), (1, 1, 0, 0), (2, 1, 1, -1)]
-    inclusions = []
-    exclusions = [(1, 2), (2, 4)]
-    box = [(1, 0, 1), (2, 0, 3)]
-    robot = [(0, 0)]
-    goal = 4"""
+
+    # nodes = [(0, 0, 1, -1), (0, 1, 1, -1), (1, 0, 1, -1), (1, 1, 0, 0), (2, 1, 1, -1)]
+    # inclusions = []
+    # exclusions = [(1, 2), (2, 4), (1, 4)]
+    # box = [(1, 0, 1), (2, 0, 3)]
+    # robot = [(0, 0)]
+    # goal = 4
 
     # Basic environment. 2 boxes. 1 hole (stack). 5 nodes.
-    """
-    nodes = [(0, 0, 1, -1), (0, 1, 1, -1), (1, 0, 1, -1), (1, 1, -1, 0), (2, 1, 1, -1)]
-    inclusions = []
-    exclusions = [(1, 2), (2, 4), (0, 3)]
-    box = [(1, 0, 1), (2, 0, 1)]
-    robot = [(0, 0)]
-    goal = 4"""
+
+    # nodes = [(0, 0, 1, -1), (0, 1, 1, -1), (1, 0, 1, -1), (1, 1, -1, 0), (2, 1, 1, -1)]
+    # inclusions = []
+    # exclusions = [(1, 2), (2, 4), (0, 3), (1, 4)]
+    # box = [(1, 0, 1), (2, 0, 1)]
+    # robot = [(0, 0)]
+    # goal = 4
 
     # Medium Environment. 2 boxes. 2 holes. 9 nodes
     """
@@ -223,7 +225,7 @@ if description == 'STIGMERGIC':
     goal = 8
     """
 
-    nodes = [(0, 0, 1, -1), (np.sqrt(2) / 2.0, np.sqrt(2) / 2.0, 1, -1), (np.sqrt(2) / 2.0, -np.sqrt(2) / 2.0, 1, -1),  # 0 - 2
+    """nodes = [(0, 0, 1, -1), (np.sqrt(2) / 2.0, np.sqrt(2) / 2.0, 1, -1), (np.sqrt(2) / 2.0, -np.sqrt(2) / 2.0, 1, -1),  # 0 - 2
              (2, 0, 0, 0), (3, 0, 1, -1), (3, 1, 1, -1), (3, -1, 1, -1), (4, 0, -3, 0), (5, 0, 1, -1), (0, -1.5, 1, -1),  # 3 - 9
              (1.5, -1.5, 1, -1), (4, -2, -2, 0), (5, -1, 1, -1), (6, 0, 1, -1), (5, 1, 1, -1), (6, 1, 1, -1), (3, 2, 1, -1), # 10 - 16
              (0, -2.5, 1, -1), (0, -4, 1, -1), (1.5, -2.5, -8, 0), (1.5, -3.5, 1, -1), (3, -2.5, 1, -1), (3, -3.5, -1, 0),  # 17 - 22
@@ -232,7 +234,7 @@ if description == 'STIGMERGIC':
     exclusions = [(1, 2), (6, 10), (12, 13), (8, 15), (13, 14), (20, 23)]
     box = [(1, 0, 1), (5, 0, 3), (9, 0, 2)]
     robot = [(0, 0), (6, 1), (23, 2)] #  (10, 2),
-    goal = 13
+    goal = 13"""
 
 
     stigmergic_main(nodes, inclusions, exclusions, box, robot, goal)

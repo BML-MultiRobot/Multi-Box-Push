@@ -5,23 +5,28 @@ from aa_graph_classes import Box, StigmergicAgent, StigmergicAgentVREP, Node
 import matplotlib.pyplot as plt
 import networkx as nx
 import heapq
+import pickle, sys
+import datetime
 
 # Logistical parameters
 PHEROMONE_ID_STAGGER = 100  # just for distinguishing pheromones
 INITIAL_BOX_DISTANCE_SET = .1  # just for presetting node distances (set low to encourage initial exploration)
-RADIUS = 2  # 1.9 for node simulation...radius for node creation (not actually for algorithm)
-SPEED = 1  # time in seconds per step for visualization
+RADIUS = 1.9  # 1.9 for node simulation...radius for node creation (not actually for algorithm)
+SPEED = .01  # time in seconds per step for visualization
 MAX_DISTANCE_SET = 20  # 20 for large # 10 for medium # 6 for small environments
 USING_HOLE_PHEROMONES = True
+env_name = 'env_1'
+grid_search = True
+
 
 # Training hyper-parameters
-EPISODES = 100
-MAX_STEPS = 20
+EPISODES = 30
+MAX_STEPS = 5
 
 # Performance hyper-parameters
-DETECTION_RADIUS = 10 # 3 for simulation...10 for V-REP
+DETECTION_RADIUS = 3  # 3 for simulation...10 for V-REP
 EXPLORE_DECAY = .95
-START_EXPLORE = .7
+START_EXPLORE = .5
 
 
 B_preference_decay = .8  # Decays every time we attempt to place a box
@@ -38,7 +43,43 @@ E_temporal_decay = .7  # Temporal decay when agent lands
 
 def stigmergic_main(nodes, inclusions, exclusions, box_data, robot_data, goal_index):
     trainer = Trainer(nodes, inclusions, exclusions, box_data, robot_data, goal_index)
-    trainer.main_algorithm()
+    if grid_search:
+        num_trials = 5
+        detection_radius = [1, 2, 3]
+        explore_decay = [.5, .75, .95]
+        initial_explore = [.2, .5, .8]
+        box_preference_decay = [.2, .5, .8]
+        explore_spatial_decay = [.5, 2, 5]
+        explore_temporal_decay = [.2, .5, .8]
+    else:
+        num_trials = 1
+        detection_radius = [DETECTION_RADIUS]
+        explore_decay = [EXPLORE_DECAY]
+        initial_explore = [START_EXPLORE]
+        box_preference_decay = [B_preference_decay]
+        explore_spatial_decay = [E_spatial_decay]
+        explore_temporal_decay = [E_temporal_decay]
+    global DETECTION_RADIUS
+    global EXPLORE_DECAY
+    global START_EXPLORE
+    global B_preference_decay
+    global E_spatial_decay
+    global E_temporal_decay
+    for r in detection_radius:
+        for e in explore_decay:
+            for i_e in initial_explore:
+                for b_pref in box_preference_decay:
+                    for e_spat_decay in explore_spatial_decay:
+                        for e_temp_decay in explore_temporal_decay:
+                            for i in range(num_trials):
+                                DETECTION_RADIUS = r
+                                EXPLORE_DECAY = e
+                                START_EXPLORE = i_e
+                                B_preference_decay = b_pref
+                                E_spatial_decay = e_spat_decay
+                                E_temporal_decay = e_temp_decay
+                                trainer.main_algorithm()
+    sys.exit(0)
 
 
 class Trainer(object):
@@ -51,6 +92,7 @@ class Trainer(object):
     def main_algorithm(self):
         self.current_environment = deepcopy(self.start_state)
         indicator_success_each_episode = []
+        steps_each_episode = []
         display_graph = nx.grid_2d_graph(2, 2)
         self.update_display_graph_using_current_environment(display_graph, 1)
         plt.ion()
@@ -78,13 +120,31 @@ class Trainer(object):
 
             self.current_environment.post_episode_pheromone_update()
             indicator_success_each_episode.append(int(achieved_goal))
+            steps_each_episode.append(int(step))
             self.reset_environment_but_preserve_trained_data()
-        # x = range(len(indicator_success_each_episode))
-        # plt.title("Moving Average Success")
-        # plt.legend()
-        # line_success = Analysis.get_moving_average(indicator_success_each_episode, 10)
-        # plt.plot(x, line_success, 'r')
-        # plt.show()
+
+        file_name = env_name + '_indicator_success_episode.txt'
+        hyper_parameters = {'Detection Radius': DETECTION_RADIUS,
+                            'Explore Decay': EXPLORE_DECAY,
+                            'Initial Explore': START_EXPLORE,
+                            'Box Preference Decay': B_preference_decay,
+                            'Exploration Pheromone Spatial Decay': E_spatial_decay,
+                            'Exploration Pheromone Temporal Decay': E_temporal_decay}
+        date_time = str(datetime.datetime.now())
+        replacements = ['-', ':', ' ', '.']
+        for r in replacements:
+            date_time = date_time.replace(r, '_')
+        self.data_to_txt(data=indicator_success_each_episode,
+                         path='/home/jimmy/Documents/Research/AN_Bridging/results/stigmergic_node_data/' + date_time + '_' + file_name)
+        self.data_to_txt(data=hyper_parameters,
+                         path='/home/jimmy/Documents/Research/AN_Bridging/results/stigmergic_node_data/' + date_time + '_' + 'hyperparameters')
+        self.data_to_txt(data=steps_each_episode,
+                         path='/home/jimmy/Documents/Research/AN_Bridging/results/stigmergic_node_data/' + date_time + '_' + 'steps')
+
+    def data_to_txt(self, data, path):
+        with open(path, "wb") as fp:   #Pickling
+            pickle.dump(data, fp)
+        return
 
     def update_display_graph_using_current_environment(self, networkx_graph, episode):
         networkx_graph.clear()
@@ -182,7 +242,8 @@ class StigmergicGraph(object):
 
         agents_with_changed_targets = [agent[1] for agent in agent_values if agent[0] > 0]
         for agent in agents_with_changed_targets:
-            agent.choose_target(self)
+            if agent.robot_id not in self.bot_to_current_path.keys() or len(self.bot_to_current_path[agent.robot_id]) == 0:
+                agent.choose_target(self)
 
         all_touched_nodes = []
         for agent in agents_with_changed_targets:
@@ -192,26 +253,31 @@ class StigmergicGraph(object):
             If greater than PHEROMONE_ID_STAGGER, then we are moving directly to a box."""
             if PHEROMONE_ID_STAGGER > agent.target_pheromone >= 0:
                 path = self.get_path_to_hole(agent.current_node, agent.target_node)
+                self.bot_to_current_path[agent.robot_id] = path[1:-1]
                 last_node_in_path = path[-1]  # Last node in path to target. If unreachable, this is just current_node
-                agent_new_location = path[-2]
-                path = path[:-1]  # This represents path up to and including agent_new_location
+                hole_is_being_filled_now = len(path) <= 2
+                agent_new_location = path[1] if not hole_is_being_filled_now else path[0]
+                path = path[:2]
 
                 box = agent.current_node.remove_box()
-                agent.target_node.place_box(box)
-                box.placement_preferences[self.nodes.index(agent.target_node)] *= B_preference_decay
+                path[1].place_box(box)
 
                 # Assert that we only remove and place once and assert that there is a path to the box candidate place
                 assert not self.box_has_been_moved(box)
                 assert agent.target_node == last_node_in_path
 
-                self.placed_box_indices.add(self.boxes.index(box))
+                box.current_node = path[1]
                 self.update_neighbors_to_reflect_box_change(agent.current_node)
-                self.update_neighbors_to_reflect_box_change(agent.target_node)
-                box.current_node = last_node_in_path
+                self.update_neighbors_to_reflect_box_change(path[1])
+
+
+                if hole_is_being_filled_now:
+                    self.placed_box_indices.add(self.boxes.index(box))
+                    path = path[:-1]
             else:
                 path = [agent.current_node, agent.target_node]
-                last_node_in_path = agent.target_node
-                agent_new_location = last_node_in_path
+                agent_new_location = agent.target_node
+                self.bot_to_current_path[agent.robot_id] = []
             self.add_d_pheromones_to_path(path)
             self.add_e_pheromones_to_path(path)
             all_touched_nodes.extend(path)
@@ -228,21 +294,20 @@ class StigmergicGraph(object):
 
     def update_neighbors_to_reflect_box_change(self, current_node):
         all_neighbors = current_node.neighbors
-        all_neighbors = all_neighbors
         for node in all_neighbors:
-            neighbors = self.get_neighbors(node, RADIUS, include_intraversable=True)
+            # neighbors = self.get_neighbors(node, RADIUS, include_intraversable=True)
             traversable_neighbors = self.get_neighbors(node, RADIUS, include_intraversable=False)
-            node.neighbors = neighbors
+            # node.neighbors = neighbors
             node.traversable_neighbors = traversable_neighbors
         # NOTE: Current node gets special treatment. If we want to move to a different node given at a node with box,
         # need to know if the other places can be traveled to
-        current_node.neighbors = self.get_neighbors(current_node, RADIUS, include_intraversable=True)
-        if len(current_node.box) > 0 and not self.box_has_been_moved(current_node.box[-1]):
-            box = current_node.box[-1]
-            current_node.traversable_neighbors = [n for n in current_node.neighbors if abs(n.z - (current_node.z - box.height)) < .1]
-        else:
-            current_node.traversable_neighbors = self.get_neighbors(current_node, RADIUS, include_intraversable=False)
-        return
+        # current_node.neighbors = self.get_neighbors(current_node, RADIUS, include_intraversable=True)
+        # if len(current_node.box) > 0 and not self.box_has_been_moved(current_node.box[-1]):
+        #     box = current_node.box[-1]
+        #     current_node.traversable_neighbors = [n for n in current_node.neighbors if abs(n.z - (current_node.z - box.height)) < .1]
+        # else:
+        #     current_node.traversable_neighbors = self.get_neighbors(current_node, RADIUS, include_intraversable=False)
+        # return
 
     def add_d_pheromones_to_path(self, path):
         official_node_set = {n for n in self.nodes if n.official}
@@ -395,6 +460,7 @@ class StigmergicGraph(object):
                 if n.pheromones[-2] < node.pheromones[-2]:
                     magnitude = node.pheromones[-2]
                     n.temp_pheromones[-2] += magnitude * np.exp(-E_spatial_decay * dist(n.pos, node.pos))
+                    n.temp_pheromones[-2] = min(n.temp_pheromones[-2], 50)
 
     def box_has_been_moved(self, box):
         return self.boxes.index(box) in self.placed_box_indices
@@ -481,7 +547,7 @@ class StigmergicGraph(object):
             if (curr_index, other_index) in self.exclusions or (other_index, curr_index) in self.exclusions:
                 continue
             elif self.get_distance_between_nodes(node, node_other) <= radius and node_other != node and \
-                    (include_intraversable or abs(node.z - node_other.z) < .3):
+                    (include_intraversable or (abs(node.z - node_other.z) < .3)):
                 neighbors.append(node_other)
             elif (curr_index, other_index) in self.inclusions or (other_index, curr_index) in self.inclusions:
                 neighbors.append(node_other)
