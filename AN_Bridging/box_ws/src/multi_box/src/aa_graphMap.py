@@ -72,11 +72,11 @@ class StigmergicGraphVREP(StigmergicGraph):
             if box_node in curr_node.neighbors:  # Pushing directly to hole
                 path = self.get_path_to_hole(box_node, agent.target_node)[1:]
                 agent_new_location = path[0]
-                # TODO: Bug here. Only decay when you first claim it
-                # TODO: Also, when finished pushing box into hole, set agent location to prev node
+                # TODO: Only decay when you first claim it? Might already handle because only goes through this once. Becomes Option 1 after claim.
                 self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)] *= aa_graphMap_node_simulation.B_preference_decay
             else:
                 """ Option 4: """
+
                 path = self.get_path_to_hole(curr_node, box_node, from_box_to_hole=False)[1:2]
                 agent_new_location = path[0]
                 box_index = -1
@@ -108,11 +108,13 @@ class StigmergicGraphVREP(StigmergicGraph):
                 box = box_node.remove_box()
                 new_node.place_box(box)
                 assert not self.box_has_been_moved(box)
-                if len(self.bot_to_current_path[robot_id]) == 0:
-                    self.placed_box_indices.add(box_index)
                 self.update_neighbors_to_reflect_box_change(curr_node)
                 self.update_neighbors_to_reflect_box_change(new_node)
                 box.current_node = new_node
+                if len(self.bot_to_current_path[robot_id]) == 0:
+                    self.placed_box_indices.add(box_index)
+                    self.handle_reaching_goal(robot_id)
+                    return  # NOTE: We return because we want to replan after placing box into hole from previous node.
 
         """ Handle adding pheromones"""
         path = [curr_node, new_node]
@@ -122,6 +124,11 @@ class StigmergicGraphVREP(StigmergicGraph):
         agent.current_node = new_node  # TODO: This is a bug. Add if statement to see if moved box (see above). If did, then don't update the agent node just yet
 
         """ Handle reaching goal node/location """
+        self.handle_reaching_goal(robot_id)
+        return
+
+    def handle_reaching_goal(self, robot_id):
+        agent, _, _ = self.get_robot_information(robot_id)
         if self.nodes.index(agent.current_node) == self.nodes.index(self.goal):
             agent.current_node = None
             self.finished_robots.add(agent)

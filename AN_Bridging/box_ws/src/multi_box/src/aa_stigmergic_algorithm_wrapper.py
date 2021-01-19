@@ -25,7 +25,7 @@ class Agent_Manager(object):
         self.robot_id = robot_id  # for now...will figure out how to do this later
         self.cmd_vel_topic = "/action#" + str(self.robot_id)
         self.policy = DoubleQ(doubleQPars, name='Dummy', task=Task(),
-                              load_path='/home/jimmy/Documents/Research/AN_Bridging/model_training_data/results/policy_comparison_results/all_final/hierarchical_q_policy2.txt')
+                              load_path='/home/jimmy/Documents/Research/AN_Bridging/results/policy_comparison_results/all_final/hierarchical_q_policy2.txt')
         self.controller = HierarchicalController()
         rospy.Subscriber("/robotState" + str(self.robot_id), String, self.receive_state_info, queue_size=1)
         rospy.Subscriber("/shutdown" + str(self.robot_id), Int16, self.shutdown, queue_size=1)
@@ -47,7 +47,6 @@ class Agent_Manager(object):
     def receive_state_info(self, msg):
         if self.counter == 0:
             state = np.array(vrep.simxUnpackFloats(msg.data))
-            print(state.shape)
             self.controller.goal = state.ravel()[:2]
             if self.finished(state):
                 if not self.shut_down:
@@ -60,7 +59,6 @@ class Agent_Manager(object):
                 if self.is_not_pushing_box(state):
                     action_index = 0 if abs(state[6]) > .2 else 1 # align yourself otherwise travel towards node
                 else:
-                    print('get action', state.shape)
                     action_index = self.policy.get_action(state, testing_time=True, probabilistic=True)
                 action_name = action_map[action_index]
                 adjusted_state_for_controls = self.controller.feature_2_task_state(state)

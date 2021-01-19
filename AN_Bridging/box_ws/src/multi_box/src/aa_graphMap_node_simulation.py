@@ -25,10 +25,10 @@ MAX_STEPS = 50
 # Performance hyper-parameters
 DETECTION_RADIUS = 3  # 3 for simulation...10 for V-REP
 EXPLORE_DECAY = .95
-START_EXPLORE = .5
+START_EXPLORE = 1
 
 
-B_preference_decay = .8  # Decays every time we attempt to place a box
+B_preference_decay = .95  # Decays every time we attempt to place a box
 Boltzmann = 1  # How certain we are in using D_pheromone to decide next node
                  # (make approx equal to inverse avg distance between nodes) V-REP nodes tend to be 2x farther apart than node simulation ones
 

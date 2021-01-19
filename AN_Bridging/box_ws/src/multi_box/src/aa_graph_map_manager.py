@@ -4,8 +4,7 @@ Uses the graphMap and runs the algorithm in conjunction with V-Rep
 """
 import matplotlib.pyplot as plt
 from Tasks.data_analysis import Analysis
-import rospy
-import vrep
+import rospy, sys, vrep
 from std_msgs.msg import String, Int16, Float32MultiArray, Int8
 from geometry_msgs.msg import Vector3
 from aa_graphMap import StigmergicGraphVREP
@@ -15,13 +14,13 @@ import networkx as nx
 import numpy as np
 import pickle
 
-path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/model_training_data/results/policy_comparison_results/all_final/state_data.txt'
+path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_comparison_results/all_final/state_data.txt'
 
 
 class Graph_Map_Manager(object):
     def __init__(self, num_agents):
         """ Data Analysis for Classification """
-        # self.data_analyzer = Analysis(path)
+        self.data_analyzer = Analysis(path)
         self.prob_threshold = .5
         self.episode = None
 
@@ -30,7 +29,7 @@ class Graph_Map_Manager(object):
         rospy.Subscriber('/starting', Int16, self.receive_episode_number, queue_size=1)
 
         """ Training Classifiers """
-        self.rf = self.data_analyzer.get_classifiers(svm_degree=2)  # Recommended <= 3
+        self.rf = self.data_analyzer.get_classifiers(estimators=200, depth=5)
         self.classifier = self.rf
 
         """ Initializing Map and Relevant Variables"""
@@ -83,10 +82,25 @@ class Graph_Map_Manager(object):
         plt.show()
         self.map_finished.publish(Int16(1))
 
+        """ For keeping track of episode termination """
+        self.restart_publisher = rospy.Publisher("/restart", Int8, queue_size=1)
+        self.robot_steps = [0 for i in range(self.num_agents)]
+        self.curr_episode = 1
+        self.max_steps = 50
+        self.max_episodes = 30
+
         """ While Loop to Replace rospy.spin() because visualizer needs to be called in main loop """
         while True:
             rospy.wait_for_message('/robot_finished', Int16)
             self.visualizer.update_display_graph_using_current_environment(self.display_graph, self.episode)
+            if min(self.robot_steps) > self.max_steps:
+                self.restart_publisher(Int8(1))
+                self.receive_time_is_up(1)
+                self.curr_episode += 1
+            if self.curr_episode > self.max_episodes:
+                break
+        sys.exit(0)
+
 
 
     def receive_time_is_up(self, msg):
@@ -144,6 +158,7 @@ class Graph_Map_Manager(object):
     def receive_finish_indicator_from_robot(self, msg):
         """ Receive indicator from robot that it has reached its assigned location. Assign it a new one. """
         robot_id = msg.data
+        self.robot_steps[robot_id] += 1
         if self.map.robots[robot_id].current_node:
             self.map.update_agent_location(robot_id, self.most_recently_assigned_positions[robot_id])
         if self.has_reached_goal(robot_id):
@@ -183,11 +198,11 @@ class Graph_Map_Manager(object):
             lst_of_states = map(lambda x: np.array(x).reshape((1, -1)), lst_of_states)
             node_id_to_states = dict(zip(lst_of_nodes, lst_of_states))
             eligible_neighbor_states[box_id] = {node_id for node_id, s in node_id_to_states.items() if self.prob_succeed(s) >= self.prob_threshold}
-            print(box_id, eligible_neighbor_states[box_id])
         return eligible_neighbor_states
 
     def prob_succeed(self, state):
         predicted_to_succeed = self.classifier.predict_proba(np.array(state)).flatten()[1]
+        print('Probability push succeed: ', predicted_to_succeed)
         return predicted_to_succeed
 
 

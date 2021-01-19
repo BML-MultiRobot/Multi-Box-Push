@@ -86,10 +86,10 @@ class Analysis(object):
                 moving_aves.append(cumsum[i] / len(cumsum))
         return moving_aves
 
-    def get_classifiers(self, svm_degree=2):
-        return self.measure_reliability_and_success(self.success, self.fail, svm_degree=svm_degree)
+    def get_classifiers(self, estimators=100, depth=2):
+        return self.measure_reliability_and_success(self.success, self.fail, estimators=estimators, depth=depth)
 
-    def measure_reliability_and_success(self, success, fail, svm_degree=2):
+    def measure_reliability_and_success(self, success, fail, estimators=100, depth=2):
         all_points = np.vstack((success, fail))
         indices = np.linspace(0, all_points.shape[1], all_points.shape[1], endpoint=False).astype(int)
         all_points = all_points[:, indices]
@@ -97,7 +97,7 @@ class Analysis(object):
 
         # filter for similar points in all_points here
         start = timer.time()
-        rf, rf_accuracy = self.random_forest_fit(all_points, labels)
+        rf, rf_accuracy = self.random_forest_fit(all_points, labels, estimators, depth)
         print('Random forest training time: ', timer.time() - start)
         # start = timer.time()
         # svm, svm_accuracy, svm_parameters = self.polynomial_svm(all_points, labels, svm_degree)
@@ -189,8 +189,8 @@ class Analysis(object):
         accuracy = svm.score(dataset, labels)
         return svm, accuracy, svm.get_params(deep=False)
     
-    def random_forest_fit(self, points, labels):
-        rf = RandomForestClassifier(n_estimators=100, max_depth = 4)
+    def random_forest_fit(self, points, labels, estimators=100, depth=4):
+        rf = RandomForestClassifier(n_estimators=estimators, max_depth = depth)
         rf.fit(points, labels)
         accuracy = rf.score(points, labels)
         return rf, accuracy

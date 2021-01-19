@@ -35,9 +35,6 @@ class StigmergicAgent(object):
         Assumes that they agent is not at a moveable box
         Returns list of tuples (max_pheromone_concentration, pheromone_index, max_node_associated_with_pheromone)
         """
-        # TODO: Take in the dictionary mapping box nodes to (hole nodes, next nodes, paths) and
-        # TODO: Use it to pre-reassign nodes with boxes. In other words, assign a target hole for every box.
-        # TODO: ^ update if the box is an immediate neighbor...
         possible_pheromones = [aa_graphMap_node_simulation.PHEROMONE_ID_STAGGER + i for i in range(len(graph.boxes)) if i not in graph.placed_box_indices and not graph.boxes[i].claimed]
         if len(self.current_node.traversable_neighbors) > 0:
             possible_pheromones.append(-1)
