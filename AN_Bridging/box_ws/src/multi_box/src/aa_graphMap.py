@@ -50,7 +50,6 @@ class StigmergicGraphVREP(StigmergicGraph):
             5. Traveling according to (E) pheromone or (D) pheromone (both of which are simple)
         """
         agent, curr_node, curr_node_id = self.get_robot_information(robot_id)
-        # TODO: Change this to take a dictionary mapping box nodes to (hole node index, next node, path)
         """ Option 1: """
         preset_path = self.bot_to_current_path.get(robot_id, [])
         if len(preset_path) > 0:
@@ -120,7 +119,7 @@ class StigmergicGraphVREP(StigmergicGraph):
         self.add_d_pheromones_to_path(path)
         self.add_e_pheromones_to_path(path)
         self.update_pheromones(path)
-        agent.current_node = new_node
+        agent.current_node = new_node  # TODO: This is a bug. Add if statement to see if moved box (see above). If did, then don't update the agent node just yet
 
         """ Handle reaching goal node/location """
         if self.nodes.index(agent.current_node) == self.nodes.index(self.goal):

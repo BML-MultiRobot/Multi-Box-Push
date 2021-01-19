@@ -1,0 +1,17 @@
+(dp0
+S'Distance Boltzmann'
+p1
+I1
+sS'Detection Radius'
+p2
+I3
+sS'Explore Decay'
+p3
+F0.95
+sS'Box Preference Decay'
+p4
+F0.8
+sS'Initial Explore'
+p5
+F0.5
+s.

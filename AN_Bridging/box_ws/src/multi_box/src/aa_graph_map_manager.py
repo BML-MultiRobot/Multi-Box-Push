@@ -2,28 +2,26 @@
 """
 Uses the graphMap and runs the algorithm in conjunction with V-Rep
 """
-import matplotlib
 import matplotlib.pyplot as plt
 from Tasks.data_analysis import Analysis
 import rospy
 import vrep
 from std_msgs.msg import String, Int16, Float32MultiArray, Int8
 from geometry_msgs.msg import Vector3
-from std_srvs.srv import Trigger
 from aa_graphMap import StigmergicGraphVREP
 import aa_graphMap_node_simulation
 from copy import deepcopy
-from itertools import groupby
 import networkx as nx
 import numpy as np
+import pickle
 
-path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/'
+path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/model_training_data/results/policy_comparison_results/all_final/state_data.txt'
 
 
 class Graph_Map_Manager(object):
     def __init__(self, num_agents):
         """ Data Analysis for Classification """
-        self.data_analyzer = Analysis(path)
+        # self.data_analyzer = Analysis(path)
         self.prob_threshold = .5
         self.episode = None
 
@@ -131,6 +129,12 @@ class Graph_Map_Manager(object):
 
     def create_map_using_vrep_markers(self, nodes, robots, inclusions, exclusions, boxes, goal):
         """ Creates a map using VREP markers, robots, and boxes """
+        # save = {'nodes': nodes, 'robots': robots, 'inclusions': inclusions, 'exclusions': exclusions, 'boxes': boxes, 'goal': goal}
+        # path = '/home/jimmy/Documents/Research/AN_Bridging/results/vrep_env_info.json'
+        # import json
+        # with open(path, 'w') as fp:
+        #     json.dump(save, fp)
+        # print(yes)
         self.map.convert_to_nodes(nodes, inclusions, exclusions, boxes, robots, goal, vrep_simulation=True)
         for node_index, robot_id in robots:
             self.most_recently_assigned_positions[robot_id] = node_index
@@ -163,9 +167,6 @@ class Graph_Map_Manager(object):
 
     def get_new_target_from_map(self, robot_id):
         """ Get new target for specified robot using stigmergic map algorithm """
-        # TODO: Call self.map.map_node_with_box_to_candidate_hole_nodes to get box nodes to (hole nodes, next nodes)
-        # TODO: Classify using get_dict_box_id_to_pushable_nodes
-        # TODO: Pass in these filtered box nodes to get_agent_target
         traversable_box_nodes = self.get_dict_box_id_to_pushable_nodes(robot_id)  # dictionary mapping box id to node ids
         target_index, box_index, pheromone = self.map.get_agent_target(robot_id, traversable_box_nodes)
         return target_index, self.most_recently_assigned_positions[robot_id], box_index, pheromone

@@ -1,0 +1,6 @@
+Distance Boltzmann: 0.5, 
+Explore Decay: 0.95, 
+Box Preference Decay: 0.95, 
+Detection Radius: 3, 
+Initial Explore: 1, 
+

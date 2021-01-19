@@ -16,7 +16,7 @@ class Hierarchical_MBRL(Agent):
             self.policy = DoubleQ(params['doubleQ_params'], name, task, load_path=1) # IMPORTNAT NOTE: make sure to initialized DoubleQ first. 
             # Otherwise, the task will reference DoubleQ as the agent...not this class (Hierarchical_MBRL)
         else:
-            self.policy = DoubleQ(params['doubleQ_params'], name, task, load_path='/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/all_final/hierarchical_q_policy2.txt')
+            self.policy = DoubleQ(params['doubleQ_params'], name, task, load_path='/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/all/all_final/hierarchical_q_policy2.txt')
 
         self.u_n = self.vPars['u_n']
         self.explore = self.vTrain['explore']

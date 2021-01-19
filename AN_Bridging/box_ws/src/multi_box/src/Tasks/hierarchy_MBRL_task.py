@@ -48,7 +48,7 @@ class Hierarchy_MBRL_Task(Task):
 
         self.reward_stop = np.inf  # once average test return of past 40 tests reaches this value, we stop training
 
-        self.mode = 'GET_METRIC' #'GET_STATE_DATA' # ''
+        self.mode = 'GET_STATE_DATA' # '' #'GET_METRIC' #
         self.num_gather_data = 10000  # how many data points gather for classification
         self.controller = HierarchicalController()
         self.simulation_name = None
@@ -338,8 +338,8 @@ class Hierarchy_MBRL_Task(Task):
     ######### POST TRAINING #########
     def postTraining(self):
         if self.mode == 'GET_STATE_DATA':
-            self.data_to_txt(data=self.data, path =  '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/' + self.agent.method + '_state_data.txt')
-            self.data_to_txt(data=self.testing_rewards, path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/' + self.agent.method + '_post_training_testing_rewards.txt')
+            self.data_to_txt(data=self.data, path =  '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/state_data.txt')
+            self.data_to_txt(data=self.testing_rewards, path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/post_training_testing_rewards.txt')
             sys.exit(0)
         elif self.mode == 'GET_METRIC':
             self.data_to_txt(data=self.data, path='/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/success.txt')

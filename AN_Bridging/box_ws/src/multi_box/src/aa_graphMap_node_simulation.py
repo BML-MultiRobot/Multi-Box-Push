@@ -11,17 +11,16 @@ import datetime
 # Logistical parameters
 PHEROMONE_ID_STAGGER = 100  # just for distinguishing pheromones
 INITIAL_BOX_DISTANCE_SET = .1  # just for presetting node distances (set low to encourage initial exploration)
-RADIUS = 1.9  # 1.9 for node simulation...radius for node creation (not actually for algorithm)
-SPEED = .01  # time in seconds per step for visualization
-MAX_DISTANCE_SET = 20  # 20 for large # 10 for medium # 6 for small environments
-USING_HOLE_PHEROMONES = True
-env_name = 'env_1'
+RADIUS = 2  # 1.9 for node simulation. 2 for V-REP environment. radius for node creation (not actually for algorithm)
+SPEED = .1  # time in seconds per step for visualization
+MAX_DISTANCE_SET = 60  # 40 for V-REP # 20 for large # 10 for medium # 6 for small environments
+env_name = 'vrep_env_node_version_1'
 grid_search = True
 
 
 # Training hyper-parameters
 EPISODES = 30
-MAX_STEPS = 5
+MAX_STEPS = 50
 
 # Performance hyper-parameters
 DETECTION_RADIUS = 3  # 3 for simulation...10 for V-REP
@@ -30,8 +29,8 @@ START_EXPLORE = .5
 
 
 B_preference_decay = .8  # Decays every time we attempt to place a box
-E_spatial_decay = 2  # Exploration spatial spreading when agent lands
-E_temporal_decay = .7  # Temporal decay when agent lands
+Boltzmann = 1  # How certain we are in using D_pheromone to decide next node
+                 # (make approx equal to inverse avg distance between nodes) V-REP nodes tend to be 2x farther apart than node simulation ones
 
 """ Convention: 
         -2 pheromone: exploration. More density -> more explored
@@ -45,40 +44,35 @@ def stigmergic_main(nodes, inclusions, exclusions, box_data, robot_data, goal_in
     trainer = Trainer(nodes, inclusions, exclusions, box_data, robot_data, goal_index)
     if grid_search:
         num_trials = 5
-        detection_radius = [1, 2, 3]
-        explore_decay = [.5, .75, .95]
-        initial_explore = [.2, .5, .8]
-        box_preference_decay = [.2, .5, .8]
-        explore_spatial_decay = [.5, 2, 5]
-        explore_temporal_decay = [.2, .5, .8]
+        detection_radius = [3]#[3, 5, 8, 10] #
+        explore_decay = [.95] #[.25, .5, .75, .95]#
+        initial_explore = [1]#[.2, .5, .8, 1] #
+        box_preference_decay = [.95]#[.2, .5, .9, .95] #
+        boltzmann =  [.25, .5, 1] #[.5, 1, 2][.5] #
     else:
         num_trials = 1
         detection_radius = [DETECTION_RADIUS]
         explore_decay = [EXPLORE_DECAY]
         initial_explore = [START_EXPLORE]
         box_preference_decay = [B_preference_decay]
-        explore_spatial_decay = [E_spatial_decay]
-        explore_temporal_decay = [E_temporal_decay]
+        boltzmann = [Boltzmann]
     global DETECTION_RADIUS
     global EXPLORE_DECAY
     global START_EXPLORE
     global B_preference_decay
-    global E_spatial_decay
-    global E_temporal_decay
+    global Boltzmann
     for r in detection_radius:
         for e in explore_decay:
             for i_e in initial_explore:
                 for b_pref in box_preference_decay:
-                    for e_spat_decay in explore_spatial_decay:
-                        for e_temp_decay in explore_temporal_decay:
-                            for i in range(num_trials):
-                                DETECTION_RADIUS = r
-                                EXPLORE_DECAY = e
-                                START_EXPLORE = i_e
-                                B_preference_decay = b_pref
-                                E_spatial_decay = e_spat_decay
-                                E_temporal_decay = e_temp_decay
-                                trainer.main_algorithm()
+                    for bolt in boltzmann:
+                        for i in range(num_trials):
+                            DETECTION_RADIUS = r
+                            EXPLORE_DECAY = e
+                            START_EXPLORE = i_e
+                            B_preference_decay = b_pref
+                            Boltzmann = bolt
+                            trainer.main_algorithm()
     sys.exit(0)
 
 
@@ -128,8 +122,7 @@ class Trainer(object):
                             'Explore Decay': EXPLORE_DECAY,
                             'Initial Explore': START_EXPLORE,
                             'Box Preference Decay': B_preference_decay,
-                            'Exploration Pheromone Spatial Decay': E_spatial_decay,
-                            'Exploration Pheromone Temporal Decay': E_temporal_decay}
+                            'Distance Boltzmann': Boltzmann}
         date_time = str(datetime.datetime.now())
         replacements = ['-', ':', ' ', '.']
         for r in replacements:
@@ -149,8 +142,8 @@ class Trainer(object):
     def update_display_graph_using_current_environment(self, networkx_graph, episode):
         networkx_graph.clear()
         plt.clf()
-        plt.xlim(-1, 6)
-        plt.ylim(-1, 2)
+        # plt.xlim(-1, 6)
+        # plt.ylim(-1, 2)
         coordinates = {i: (node.coords[0], node.coords[1]) for i, node in enumerate(self.current_environment.nodes)}
         networkx_graph.add_nodes_from(coordinates.keys())
         all_edges = set()
@@ -199,8 +192,14 @@ class Trainer(object):
         new_environment.exclusions = self.current_environment.exclusions
         new_environment.inclusions = self.current_environment.inclusions
         # Iterate in list order
+        # Keep E pheromone within finite range (0 - 200)
+        e_pheromones = []
+        for node in self.current_environment.nodes:
+            e_pheromones.append(node.pheromones[-2])
+        rescale = 500.0 / max(e_pheromones) if max(e_pheromones) > 200 else 1
         for k, node in enumerate(new_environment.nodes):
             node.pheromones = self.current_environment.nodes[k].pheromones
+            node.pheromones[-2] *= rescale
             node.distance_to_goal = self.current_environment.nodes[k].distance_to_goal
             node.official = self.current_environment.nodes[k].official
         for k, box in enumerate(new_environment.boxes):
@@ -237,8 +236,6 @@ class StigmergicGraph(object):
             agent_value = agent.get_value_of_agent(self)
             agent.value = agent_value
             agent_values.append((agent_value, agent))
-        if all([v < 0 for v, agent in agent_values]):
-            return False, True
 
         agents_with_changed_targets = [agent[1] for agent in agent_values if agent[0] > 0]
         for agent in agents_with_changed_targets:
@@ -269,7 +266,6 @@ class StigmergicGraph(object):
                 box.current_node = path[1]
                 self.update_neighbors_to_reflect_box_change(agent.current_node)
                 self.update_neighbors_to_reflect_box_change(path[1])
-
 
                 if hole_is_being_filled_now:
                     self.placed_box_indices.add(self.boxes.index(box))
@@ -330,6 +326,7 @@ class StigmergicGraph(object):
                         node.distance_to_goal = min(node.distance_to_goal, official_distance)
                     else:
                         node.distance_to_goal = official_distance
+                        print('### Node number ', self.nodes.index(node), ' is now OFFICIAL')
                     node.official = True
                 else:
                     if not already_is_official:
@@ -407,13 +404,9 @@ class StigmergicGraph(object):
 
     def boxes_calculate_values(self):
         for i, box in enumerate(self.boxes):
-            if USING_HOLE_PHEROMONES:
-                subset_of_candidates_with_path = [value for index, value in box.placement_preferences.items()
-                                                  if self.check_if_box_has_hole_pheromone_indicator(box.current_node,
-                                                                                                    index)]
-            else:
-                subset_of_candidates_with_path = [value for index, value in box.placement_preferences.items()
-                                                  if self.exists_path_box_to_hole(box.current_node, self.nodes[index])]
+            subset_of_candidates_with_path = [value for index, value in box.placement_preferences.items()
+                                              if self.check_if_box_has_hole_pheromone_indicator(box.current_node,
+                                                                                                index)]
             box_value = max(subset_of_candidates_with_path) if len(subset_of_candidates_with_path) > 0 else 0
             box.current_pheromone_value = box_value if not box.claimed else 0
 
@@ -426,8 +419,6 @@ class StigmergicGraph(object):
         self.boxes_calculate_values()
         self.drop_hole_pheromones(all_touched_nodes)
         self.update_hole_pheromones(all_touched_nodes)
-        self.spread_E_pheromones_along_path(all_touched_nodes)
-        self.decay(all_touched_nodes)
         self.add_temp_pheromones()
 
     def drop_hole_pheromones(self, path):
@@ -435,7 +426,8 @@ class StigmergicGraph(object):
             hole_nodes = [self.nodes.index(n) for n in node.neighbors if n.box_id >= 0]
             pheromones = node.pheromones
             for hole in hole_nodes:
-                pheromones[hole] = min(pheromones[hole], self.get_distance_between_nodes(self.nodes[hole], node))
+                pheromones[hole] = max(pheromones[hole], 1.0/self.get_distance_between_nodes(self.nodes[hole], node))
+                assert not np.isnan(pheromones[hole])
         return
 
     def update_hole_pheromones(self, path):
@@ -444,31 +436,17 @@ class StigmergicGraph(object):
             neighbors = node.traversable_neighbors
             if len(neighbors) > 0:
                 for p in hole_pheromones:
-                    max_p = max([n.pheromones[p] * np.exp(-E_spatial_decay * dist(node.pos, n.pos)) for n in neighbors])
+                    max_p = max([n.pheromones[p] * np.exp(-1 * dist(node.pos, n.pos)) for n in neighbors])
                     if node.pheromones[p] < max_p:
                         node.pheromones[p] = max_p
         return
 
     def add_e_pheromones_to_path(self, path):
         for node in path:  # Update E pheromone but include the first node as well
-            node.pheromones[-2] += 1
-
-    def spread_E_pheromones_along_path(self, path):
-        for node in path:
-            neighbors = node.traversable_neighbors
-            for n in neighbors:
-                if n.pheromones[-2] < node.pheromones[-2]:
-                    magnitude = node.pheromones[-2]
-                    n.temp_pheromones[-2] += magnitude * np.exp(-E_spatial_decay * dist(n.pos, node.pos))
-                    n.temp_pheromones[-2] = min(n.temp_pheromones[-2], 50)
+            node.pheromones[-2] += 1.0
 
     def box_has_been_moved(self, box):
         return self.boxes.index(box) in self.placed_box_indices
-
-    def decay(self, all_touched_nodes):
-        for node in all_touched_nodes:
-            pheromones = node.pheromones
-            pheromones[-2] *= E_temporal_decay
 
     def add_temp_pheromones(self):
         for node in self.nodes:
