@@ -13,6 +13,7 @@ from copy import deepcopy
 import networkx as nx
 import numpy as np
 import pickle
+import time
 
 path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_comparison_results/all_final/state_data.txt'
 
@@ -21,7 +22,7 @@ class Graph_Map_Manager(object):
     def __init__(self, num_agents):
         """ Data Analysis for Classification """
         self.data_analyzer = Analysis(path)
-        self.prob_threshold = .5
+        self.prob_threshold = .7
         self.episode = None
 
         """ Topics for V-REP episode management """
@@ -88,26 +89,64 @@ class Graph_Map_Manager(object):
         self.curr_episode = 1
         self.max_steps = 50
         self.max_episodes = 30
+        self.max_time_in_seconds = 800  # just in case the policy doesn't do very well or something goes wrong...
+        self.total_steps = []
+        self.success = []
 
         """ While Loop to Replace rospy.spin() because visualizer needs to be called in main loop """
+        start = time.time()
         while True:
             rospy.wait_for_message('/robot_finished', Int16)
             self.visualizer.update_display_graph_using_current_environment(self.display_graph, self.episode)
-            if min(self.robot_steps) > self.max_steps:
-                self.restart_publisher(Int8(1))
+            reached_goal = [self.has_reached_goal(robot_id) for robot_id in range(self.num_agents)]
+            curr_time = time.time() - start
+            if not all(reached_goal):
+                steps = min([self.robot_steps[robot_id] for robot_id in range(self.num_agents) if not reached_goal[robot_id]])
+                print('Until episode termination: ', max(float(steps / float(self.max_steps)), curr_time / float(self.max_time_in_seconds)))
+                timed_out = steps > self.max_steps or curr_time > self.max_time_in_seconds
+            else:
+                steps = max(self.robot_steps)
+                timed_out = False
+            if all(reached_goal) or timed_out:
+                self.restart_publisher.publish(Int8(1))
                 self.receive_time_is_up(1)
                 self.curr_episode += 1
+                self.total_steps.append(steps if curr_time <= self.max_time_in_seconds else self.max_steps)
+                self.success.append(all(reached_goal))
+                start = time.time()
+                print('')
+                print('Running total steps: ', self.total_steps)
+                print('')
+                print('Running success: ', self.success)
+                print('')
+                self.robot_steps = [0 for i in range(self.num_agents)]
+                rospy.wait_for_message('/starting', Int16)
+                time.sleep(1)
+                for i in range(self.num_agents):
+                    self.receive_finish_indicator_from_robot(Int16(i))
             if self.curr_episode > self.max_episodes:
                 break
+
+        self.data_to_txt(data=self.total_steps,
+                         path='/home/jimmy/Documents/Research/AN_Bridging/results/stigmergic_node_data/total_steps.txt')
+        self.data_to_txt(data=self.success,
+                         path='/home/jimmy/Documents/Research/AN_Bridging/results/stigmergic_node_data/success.txt')
+
         sys.exit(0)
 
-
+    def data_to_txt(self, data, path):
+        with open(path, "wb") as fp:  # Pickling
+            pickle.dump(data, fp)
+        return
 
     def receive_time_is_up(self, msg):
         """ Receive msg from manager.py that time is up and reset the environment"""
+        self.map.post_episode_pheromone_update()
         self.visualizer.reset_environment_but_preserve_trained_data()
         self.map = self.visualizer.current_environment
         self.most_recently_assigned_positions = deepcopy(self.initial_positions)
+        for i, shut_pub in self.agent_to_shut_down.items():
+            shut_pub.publish(Int16(0))
         return
 
     def receive_episode_number(self, msg):
@@ -149,6 +188,8 @@ class Graph_Map_Manager(object):
         # with open(path, 'w') as fp:
         #     json.dump(save, fp)
         # print(yes)
+        inclusions = [tuple(tup) for tup in inclusions]
+        exclusions = [tuple(tup) for tup in exclusions]
         self.map.convert_to_nodes(nodes, inclusions, exclusions, boxes, robots, goal, vrep_simulation=True)
         for node_index, robot_id in robots:
             self.most_recently_assigned_positions[robot_id] = node_index
@@ -165,6 +206,7 @@ class Graph_Map_Manager(object):
             self.agent_to_shut_down[robot_id].publish(Int16(1))
         else:
             self.send_target_to_robot_in_vrep(robot_id)
+
 
     def has_reached_goal(self, robot_id):
         """ A robot has reached the goal if its current_node is null...it's been 'removed' from the map """

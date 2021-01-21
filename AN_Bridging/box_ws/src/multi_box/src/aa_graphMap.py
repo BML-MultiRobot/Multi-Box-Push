@@ -74,6 +74,7 @@ class StigmergicGraphVREP(StigmergicGraph):
                 agent_new_location = path[0]
                 # TODO: Only decay when you first claim it? Might already handle because only goes through this once. Becomes Option 1 after claim.
                 self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)] *= aa_graphMap_node_simulation.B_preference_decay
+                print('New placement preference: ', self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)])
             else:
                 """ Option 4: """
 
@@ -109,19 +110,21 @@ class StigmergicGraphVREP(StigmergicGraph):
                 new_node.place_box(box)
                 assert not self.box_has_been_moved(box)
                 self.update_neighbors_to_reflect_box_change(curr_node)
+                self.update_neighbors_to_reflect_box_change(box_node)
                 self.update_neighbors_to_reflect_box_change(new_node)
+                box_prev_node = box.current_node
                 box.current_node = new_node
                 if len(self.bot_to_current_path[robot_id]) == 0:
                     self.placed_box_indices.add(box_index)
                     self.handle_reaching_goal(robot_id)
-                    return  # NOTE: We return because we want to replan after placing box into hole from previous node.
+                    new_node = box_prev_node
 
         """ Handle adding pheromones"""
         path = [curr_node, new_node]
         self.add_d_pheromones_to_path(path)
         self.add_e_pheromones_to_path(path)
         self.update_pheromones(path)
-        agent.current_node = new_node  # TODO: This is a bug. Add if statement to see if moved box (see above). If did, then don't update the agent node just yet
+        agent.current_node = new_node
 
         """ Handle reaching goal node/location """
         self.handle_reaching_goal(robot_id)

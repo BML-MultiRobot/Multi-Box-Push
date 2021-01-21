@@ -19,11 +19,11 @@ grid_search = True
 
 
 # Training hyper-parameters
-EPISODES = 30
+EPISODES = 50
 MAX_STEPS = 50
 
 # Performance hyper-parameters
-DETECTION_RADIUS = 3  # 3 for simulation...10 for V-REP
+DETECTION_RADIUS = 5  # 3 for simulation...10 for V-REP
 EXPLORE_DECAY = .95
 START_EXPLORE = 1
 

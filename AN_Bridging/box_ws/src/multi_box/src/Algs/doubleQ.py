@@ -81,7 +81,6 @@ class DoubleQ(Agent):
             index = np.random.randint(self.out_n)
         else:
             q = self.get_q(s)
-            print(q)
             if probabilistic:
                 q = q.numpy()
                 q = q - np.max(q)

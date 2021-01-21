@@ -209,6 +209,7 @@ class StigmergicAgentVREP(StigmergicAgent):
             traversable_neighbors = self.current_node.traversable_neighbors
             candidate_nodes = traversable_neighbors + list([k for k, v in node_with_box_to_hole_index_options.items() if len(v) > 0])
             candidate_nodes = [n for n in candidate_nodes if collision_weights[n] > 0]
+
             explored_pheromone_concentrations = [n.pheromones[-2] for n in candidate_nodes]
             prob = np.exp(-np.array(explored_pheromone_concentrations))  # Higher E pheromone gets lower probability
             if prob.size == 0:
@@ -323,6 +324,6 @@ class Node(object):
             for box in self.box:
                 if box.box_id == self.box_id and graph.box_has_been_moved(box):
                     box.placement_preferences[graph.nodes.index(self)] *= (1.0 / aa_graphMap_node_simulation.B_preference_decay)
-                    box.placement_preferences[graph.nodes.index(self)] = min(box.placement_preferences[graph.nodes.index(self)], aa_graphMap_node_simulation.MAX_DISTANCE_SET)
-                    print('New placement preference', min(box.placement_preferences[graph.nodes.index(self)], aa_graphMap_node_simulation.MAX_DISTANCE_SET))
+                    box.placement_preferences[graph.nodes.index(self)] = min(box.placement_preferences[graph.nodes.index(self)], 2 * aa_graphMap_node_simulation.MAX_DISTANCE_SET)
+                    print('New placement preference', box.placement_preferences[graph.nodes.index(self)])
         self.pheromones[-1] = concentration

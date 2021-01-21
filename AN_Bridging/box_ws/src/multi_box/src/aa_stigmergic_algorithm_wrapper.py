@@ -49,15 +49,21 @@ class Agent_Manager(object):
             state = np.array(vrep.simxUnpackFloats(msg.data))
             self.controller.goal = state.ravel()[:2]
             if self.finished(state):
-                if not self.shut_down:
-                    self.publish_finished_to_map()
-                msg = Vector3()
-                msg.x = 0
-                msg.y = 0
-                self.pub.publish(msg)
+                if not self.shut_down and (not self.is_not_pushing_box(state)) and state[7] < -.25 and dist(state[5:7], np.zeros(2)) < 1: # hole
+                    msg = Vector3()
+                    msg.x = -2
+                    msg.y = -2
+                    self.pub.publish(msg)
+                else:
+                    if not self.shut_down:
+                        self.publish_finished_to_map()
+                    msg = Vector3()
+                    msg.x = 1
+                    msg.y = 1
+                    self.pub.publish(msg)
             else:
                 if self.is_not_pushing_box(state):
-                    action_index = 0 if abs(state[6]) > .2 else 1 # align yourself otherwise travel towards node
+                    action_index = 0 if abs(state[6]) > .4 else 1 # align yourself otherwise travel towards node
                 else:
                     action_index = self.policy.get_action(state, testing_time=True, probabilistic=True)
                 action_name = action_map[action_index]
@@ -91,6 +97,8 @@ class Agent_Manager(object):
         protocol = msg.data
         if protocol == 1: # shutdown completely
             self.shut_down = True
+        else:
+            self.shut_down = False
 
     def receive_restart(self, msg):
         self.shut_down = False
