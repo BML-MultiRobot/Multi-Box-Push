@@ -14,8 +14,8 @@ INITIAL_BOX_DISTANCE_SET = .1  # just for presetting node distances (set low to 
 RADIUS = 2  # 1.9 for node simulation. 2 for V-REP environment. radius for node creation (not actually for algorithm)
 SPEED = .1  # time in seconds per step for visualization
 MAX_DISTANCE_SET = 60  # 40 for V-REP # 20 for large # 10 for medium # 6 for small environments
-env_name = 'vrep_env_node_version_1'
-grid_search = True
+env_name = 'vrep_env_node_version_2'
+grid_search = False
 
 
 # Training hyper-parameters
@@ -24,8 +24,9 @@ MAX_STEPS = 50
 
 # Performance hyper-parameters
 DETECTION_RADIUS = 5  # 3 for simulation...10 for V-REP
-EXPLORE_DECAY = .95
-START_EXPLORE = 1
+EXPLORE_DECAY = .25 # .95
+START_EXPLORE = .5
+MIN_EXPLORE = 0
 
 
 B_preference_decay = .95  # Decays every time we attempt to place a box
@@ -318,7 +319,7 @@ class StigmergicGraph(object):
                 has_neighbors_right_now = len(traversable_neighbors) > 0
                 already_is_official = node.official
                 if is_now_official and has_neighbors_right_now:
-                    closest_to_goal = max(official_neighbors, key=lambda
+                    closest_to_goal = min(official_neighbors, key=lambda
                         neighbor: neighbor.distance_to_goal + self.get_distance_between_nodes(node, neighbor))
                     official_distance = closest_to_goal.distance_to_goal + self.get_distance_between_nodes(node,
                                                                                                            closest_to_goal)
@@ -405,12 +406,13 @@ class StigmergicGraph(object):
     def boxes_calculate_values(self):
         for i, box in enumerate(self.boxes):
             subset_of_candidates_with_path = [value for index, value in box.placement_preferences.items()
-                                              if self.check_if_box_has_hole_pheromone_indicator(box.current_node,
+                                              if self.check_if_box_has_hole_pheromone_indicator(box,
                                                                                                 index)]
             box_value = max(subset_of_candidates_with_path) if len(subset_of_candidates_with_path) > 0 else 0
             box.current_pheromone_value = box_value if not box.claimed else 0
 
-    def check_if_box_has_hole_pheromone_indicator(self, current_node, candidate_index):
+    def check_if_box_has_hole_pheromone_indicator(self, box, candidate_index):
+        current_node = box.current_node
         neighbors = current_node.neighbors
         has_path = any([n.pheromones[candidate_index] > 0 for n in neighbors])
         return has_path
@@ -426,7 +428,9 @@ class StigmergicGraph(object):
             hole_nodes = [self.nodes.index(n) for n in node.neighbors if n.box_id >= 0]
             pheromones = node.pheromones
             for hole in hole_nodes:
-                pheromones[hole] = max(pheromones[hole], 1.0/self.get_distance_between_nodes(self.nodes[hole], node))
+                distance = self.get_distance_between_nodes(self.nodes[hole], node)
+                if distance < DETECTION_RADIUS:
+                    pheromones[hole] = max(pheromones[hole], 1.0/distance)
                 assert not np.isnan(pheromones[hole])
         return
 
@@ -525,7 +529,7 @@ class StigmergicGraph(object):
             if (curr_index, other_index) in self.exclusions or (other_index, curr_index) in self.exclusions:
                 continue
             elif self.get_distance_between_nodes(node, node_other) <= radius and node_other != node and \
-                    (include_intraversable or (abs(node.z - node_other.z) < .3)):
+                    (include_intraversable or (abs(node.z - node_other.z) < .1)):
                 neighbors.append(node_other)
             elif (curr_index, other_index) in self.inclusions or (other_index, curr_index) in self.inclusions:
                 neighbors.append(node_other)

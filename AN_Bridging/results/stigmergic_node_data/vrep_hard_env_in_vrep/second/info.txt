@@ -1,0 +1,29 @@
+boltzmann in policy: 12
+
+PHEROMONE_ID_STAGGER = 100  # just for distinguishing pheromones
+INITIAL_BOX_DISTANCE_SET = .1  # just for presetting node distances (set low to encourage initial exploration)
+RADIUS = 2  # 1.9 for node simulation. 2 for V-REP environment. radius for node creation (not actually for algorithm)
+SPEED = .1  # time in seconds per step for visualization
+MAX_DISTANCE_SET = 60  # 40 for V-REP # 20 for large # 10 for medium # 6 for small environments
+env_name = 'vrep_env_node_version_2'
+grid_search = False
+
+
+# Training hyper-parameters
+EPISODES = 20
+MAX_STEPS = 80
+
+# Performance hyper-parameters
+DETECTION_RADIUS = 20  # 3 for simulation...10 for V-REP
+EXPLORE_DECAY = .95
+START_EXPLORE = 0
+MIN_EXPLORE = 0
+
+
+B_preference_decay = .95  # Decays every time we attempt to place a box
+Boltzmann = 1  # How certain we are in using D_pheromone to decide next node
+                 # (make approx equal to inverse avg distance between nodes) V-REP nodes tend to be 2x farther apart than node simulation ones
+
+4 AGENTS! 
+records the average number of steps taken by agents
+

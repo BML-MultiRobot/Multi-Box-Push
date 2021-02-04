@@ -53,12 +53,16 @@ class StigmergicGraphVREP(StigmergicGraph):
         """ Option 1: """
         preset_path = self.bot_to_current_path.get(robot_id, [])
         if len(preset_path) > 0:
-            can_push_box_to_next_node = self.nodes.index(preset_path[0]) in traversable_box_nodes[agent.target_pheromone]
+            collision_weights = agent.calculate_collision_detection_weights(self)
+            can_push_box_to_next_node = self.nodes.index(preset_path[0]) in traversable_box_nodes[agent.target_pheromone - aa_graphMap_node_simulation.PHEROMONE_ID_STAGGER]
             if can_push_box_to_next_node:
-                agent_new_location_index = self.nodes.index(preset_path[0])
-                box_index = agent.target_pheromone
-                self.bot_to_current_path[robot_id] = preset_path
-                return agent_new_location_index, box_index, agent.target_pheromone
+                if collision_weights[preset_path[0]] == 0:
+                    return self.nodes.index(agent.current_node), agent.target_pheromone - aa_graphMap_node_simulation.PHEROMONE_ID_STAGGER, agent.target_pheromone
+                else:
+                    agent_new_location_index = self.nodes.index(preset_path[0])
+                    box_index = agent.target_pheromone - aa_graphMap_node_simulation.PHEROMONE_ID_STAGGER
+                    self.bot_to_current_path[robot_id] = preset_path
+                    return agent_new_location_index, box_index, agent.target_pheromone
 
         agent.choose_target(self, traversable_box_nodes)
 
@@ -69,15 +73,14 @@ class StigmergicGraphVREP(StigmergicGraph):
         if agent.target_pheromone >= aa_graphMap_node_simulation.PHEROMONE_ID_STAGGER:
             box_index, box, box_node, box_node_id = self.get_box_information(agent.target_pheromone)
             """ Option 3: """
-            if box_node in curr_node.neighbors:  # Pushing directly to hole
+            if box_node in curr_node.neighbors or box_node == curr_node:  # Pushing directly to hole
                 path = self.get_path_to_hole(box_node, agent.target_node)[1:]
                 agent_new_location = path[0]
-                # TODO: Only decay when you first claim it? Might already handle because only goes through this once. Becomes Option 1 after claim.
+                agent.current_node = box_node  # TODO: This is a CHANGE. Might be buggy.
                 self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)] *= aa_graphMap_node_simulation.B_preference_decay
-                print('New placement preference: ', self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)])
+                print(agent.robot_id, 'DECAYED: New placement preference: ', self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)])
             else:
                 """ Option 4: """
-
                 path = self.get_path_to_hole(curr_node, box_node, from_box_to_hole=False)[1:2]
                 agent_new_location = path[0]
                 box_index = -1
@@ -98,7 +101,7 @@ class StigmergicGraphVREP(StigmergicGraph):
         agent, curr_node, curr_node_id = self.get_robot_information(robot_id)
         new_node = self.nodes[new_node_id]
         traveled_path = self.bot_to_current_path[robot_id] if robot_id in self.bot_to_current_path.keys() else [new_node]
-        if len(traveled_path) == 0:  # didn't go anywhere
+        if len(traveled_path) == 0 or traveled_path[0] != self.nodes[new_node_id]:  # didn't go anywhere
             return
         traveled_path.pop(0)
 

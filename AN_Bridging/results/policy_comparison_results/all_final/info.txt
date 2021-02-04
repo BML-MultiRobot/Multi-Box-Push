@@ -1,0 +1,3 @@
+hierarchical policy 1 refers to the looser reward function
+
+the second one refers to the more strict, explicit reward (trained at a later time to get better performance)

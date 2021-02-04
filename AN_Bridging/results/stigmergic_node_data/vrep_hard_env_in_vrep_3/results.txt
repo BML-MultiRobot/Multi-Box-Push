@@ -1,0 +1,10 @@
+total steps:
+
+mean: 55.825
+standard deviation: 26.8878
+
+
+proportion of robots succeed:
+
+mean: .73
+stanard deviation: .29

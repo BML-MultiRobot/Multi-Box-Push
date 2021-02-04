@@ -26,7 +26,7 @@ algs = {
     6: 'STIGMERGIC',
     7: 'TEST'
 }
-ALGORITHM = 6
+ALGORITHM = 5
 description = algs[ALGORITHM]
 rospy.init_node('Dummy', anonymous=True)
 
@@ -157,7 +157,7 @@ if description == 'MBRL':
                 'trainMode':    False,  # Make sure both value and policy are set to the same thing
                 'load':         False, 
                 'dual':         False,
-                'beta':         8  # boltzmann. Increase for more certainty when making decisions
+                'beta':         16  # boltzmann. Increase for more certainty when making decisions
                 } 
     policyTrain = {
                 'batch':        128,  # used to be 256

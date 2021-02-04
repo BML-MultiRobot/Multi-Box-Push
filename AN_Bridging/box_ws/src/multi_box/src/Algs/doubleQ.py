@@ -54,7 +54,7 @@ class DoubleQ(Agent):
             task.postTraining()
 
     def saveModel(self):
-        torch.save(self.valueNet.state_dict(), '/home/jimmy/Documents/Research/AN_Bridging/model_training_data/hierarchical_q_policy2.txt')
+        torch.save(self.valueNet.state_dict(), '/home/jimmy/Documents/Research/AN_Bridging/results/hierarchical_q_policy2.txt')
         pass
 
     def store(self, s, a, r, sprime, aprime, done):

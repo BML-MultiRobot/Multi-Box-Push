@@ -9,8 +9,8 @@ class Box(object):
         self.height = height
         self.current_node = current_node
         self.candidate_indices = candidate_indices   # Hole indices this box can be placed in
-        self.placement_preferences = {c: aa_graphMap_node_simulation.MAX_DISTANCE_SET for c in self.candidate_indices}
-        self.current_pheromone_value = aa_graphMap_node_simulation.MAX_DISTANCE_SET
+        self.placement_preferences = {c: 2 * aa_graphMap_node_simulation.MAX_DISTANCE_SET for c in self.candidate_indices}
+        self.current_pheromone_value = 2 * aa_graphMap_node_simulation.MAX_DISTANCE_SET
         self.claimed = False
 
 class StigmergicAgent(object):
@@ -99,7 +99,7 @@ class StigmergicAgent(object):
         box = self.get_box(graph)
         if box:
             box.claimed = True
-            pheromone_options = [i for i in box.candidate_indices if graph.check_if_box_has_hole_pheromone_indicator(self.current_node, i) or self.can_push_directly_from_box_to_hole(graph, box.current_node, graph.nodes[i])]
+            pheromone_options = [i for i in box.candidate_indices if graph.check_if_box_has_hole_pheromone_indicator(box, i) or self.can_push_directly_from_box_to_hole(graph, box.current_node, graph.nodes[i])]
             if randomize < self.explore:  # Move to random candidate index
                 # candidate_indices = self.current_node.box[-1].candidate_indices
                 num_options = len(pheromone_options)
@@ -154,6 +154,7 @@ class StigmergicAgent(object):
                 #    print(' Probability traveled to location', graph.nodes.index(self.target_node), ': ', prob[choice_index])
         if randomize < self.explore:
             self.explore *= aa_graphMap_node_simulation.EXPLORE_DECAY
+            self.explore = max(aa_graphMap_node_simulation.MIN_EXPLORE, self.explore)
             print('### EXPLORE probability: ', self.explore)
         if aa_graphMap_node_simulation.PHEROMONE_ID_STAGGER > self.target_pheromone >= 0:
             assert len(self.current_node.box) >= 1
@@ -195,7 +196,7 @@ class StigmergicAgent(object):
 
 class StigmergicAgentVREP(StigmergicAgent):
 
-    def choose_target(self, graph, reachable_box_nodes=None):
+    def choose_target(self, graph, reachable_box_nodes=None, unallowed_nodes=[]):
         """ Choose new target for the agent given the graph's local information.
 
         reachable_box_nodes: dict box_id to list of node ids box can be pushed to given agent's curr location.
@@ -208,7 +209,7 @@ class StigmergicAgentVREP(StigmergicAgent):
         if randomize < self.explore: # Choose a hole target for box in neighbor for each of the boxes. Decide at uniform
             traversable_neighbors = self.current_node.traversable_neighbors
             candidate_nodes = traversable_neighbors + list([k for k, v in node_with_box_to_hole_index_options.items() if len(v) > 0])
-            candidate_nodes = [n for n in candidate_nodes if collision_weights[n] > 0]
+            candidate_nodes = [n for n in candidate_nodes if n in collision_weights.keys() and collision_weights[n] > 0]  # TODO: This might cause bugs!
 
             explored_pheromone_concentrations = [n.pheromones[-2] for n in candidate_nodes]
             prob = np.exp(-np.array(explored_pheromone_concentrations))  # Higher E pheromone gets lower probability
@@ -217,6 +218,8 @@ class StigmergicAgentVREP(StigmergicAgent):
                 return
             prob = prob / np.sum(prob)
             random_choice = candidate_nodes[np.random.choice(len(prob), p=prob)]
+            if len(node_with_box_to_hole_index_options.keys()) > 0:  # NEW RULE: If next to a box, you have to push it.
+                random_choice = np.random.choice(list(node_with_box_to_hole_index_options.keys()))
 
             if random_choice in node_with_box_to_hole_index_options.keys():  # Chose the box
                 self.target_pheromone = graph.boxes.index(random_choice.box[-1]) + aa_graphMap_node_simulation.PHEROMONE_ID_STAGGER
@@ -225,26 +228,33 @@ class StigmergicAgentVREP(StigmergicAgent):
                 self.target_pheromone = -2
                 self.target_node = random_choice
             self.explore *= aa_graphMap_node_simulation.EXPLORE_DECAY
+            self.explore = max(aa_graphMap_node_simulation.MIN_EXPLORE, self.explore)
         else:
             box_pheromone_to_node_associated_to_hole = {}
-            for node_with_box, lst_of_hole_indices in node_with_box_to_hole_index_options.items():
-                box = node_with_box.box[-1]
+            max_pheromones_to_associated_node = [tup for tup in max_pheromones_to_associated_node if
+                                                 tup[1] < aa_graphMap_node_simulation.PHEROMONE_ID_STAGGER]
+            if len(node_with_box_to_hole_index_options) > 0:
+                closest_node_with_box = min(list(node_with_box_to_hole_index_options.keys()),
+                                            key=lambda node: graph.get_detection_distance_between_nodes(node, self.current_node))
+                box = closest_node_with_box.box[-1]
                 box_index_pheromone = graph.boxes.index(box) + aa_graphMap_node_simulation.PHEROMONE_ID_STAGGER
                 old_box_pheromone = next((x for x in max_pheromones_to_associated_node if x[1] == box_index_pheromone), None)
                 max_pheromones_to_associated_node.remove(old_box_pheromone) if old_box_pheromone else None
+                lst_of_hole_indices = node_with_box_to_hole_index_options[closest_node_with_box]
                 if len(lst_of_hole_indices) > 0:  # If this box has options, modify the pheromone decision
                     hole_preferences = [box.placement_preferences[i] for i in lst_of_hole_indices]
                     p = self.softmax_skewed_down(hole_preferences)
                     hole_index_choice = lst_of_hole_indices[np.random.choice(len(p), p=p)]
                     box_pheromone_to_node_associated_to_hole[box_index_pheromone] = graph.nodes[hole_index_choice]
-                    new_pheromone_concentration = box.placement_preferences[hole_index_choice]
-                    max_pheromones_to_associated_node.append((new_pheromone_concentration, box_index_pheromone, node_with_box))
+                    new_pheromone_concentration = max(box.placement_preferences.values()) # box.placement_preferences[hole_index_choice]  # TODO: This was changed!
+                    max_pheromones_to_associated_node.append((new_pheromone_concentration, box_index_pheromone, closest_node_with_box))
             if len(max_pheromones_to_associated_node) == 0:
                 self.target_node = None
                 self.target_pheromone = None
                 return
 
-            prob = np.array([p[0] * collision_weights[p[2]] for p in max_pheromones_to_associated_node])
+            prob = np.array([p[0] * collision_weights[p[2]] if p[2] in collision_weights.keys() else p[0] for p in max_pheromones_to_associated_node])  # TODO: This might cause bugs
+            # print(self.robot_id, prob)
             prob = self.softmax_skewed_down(prob)
 
             assert np.all(prob > 0)
@@ -271,18 +281,22 @@ class StigmergicAgentVREP(StigmergicAgent):
         for node_with_box in has_box_move_able:
             box = node_with_box.box[-1]
             box_index = graph.boxes.index(box)
-            hole_options = [i for i in box.candidate_indices if graph.check_if_box_has_hole_pheromone_indicator(box.current_node, i) or
+            hole_options = [i for i in box.candidate_indices if graph.check_if_box_has_hole_pheromone_indicator(box, i) or
                             self.can_push_directly_from_box_to_hole(graph, box.current_node, graph.nodes[i])]
 
             nodes_to_push_box_to = []
             for node_index_associated_to_hole in hole_options:
                 path = graph.get_path_to_hole(start=box.current_node, finish=graph.nodes[node_index_associated_to_hole])
+                if len(path) < 2:
+                    print(node_index_associated_to_hole)
+                    print(yes)
                 next_node_index = graph.nodes.index(path[1])
                 achievable = next_node_index in reachable_box_nodes[box_index]
                 if achievable:
                     nodes_to_push_box_to.append(node_index_associated_to_hole)
             # nodes_to_push_box_to contains node indices of possible possible achievable places we can push the box to
-            box_instance_to_hole_index_options[node_with_box] = nodes_to_push_box_to
+            if len(nodes_to_push_box_to) > 0:
+                box_instance_to_hole_index_options[node_with_box] = nodes_to_push_box_to
         return box_instance_to_hole_index_options
 
 class Node(object):
@@ -324,6 +338,6 @@ class Node(object):
             for box in self.box:
                 if box.box_id == self.box_id and graph.box_has_been_moved(box):
                     box.placement_preferences[graph.nodes.index(self)] *= (1.0 / aa_graphMap_node_simulation.B_preference_decay)
-                    box.placement_preferences[graph.nodes.index(self)] = min(box.placement_preferences[graph.nodes.index(self)], 2 * aa_graphMap_node_simulation.MAX_DISTANCE_SET)
-                    print('New placement preference', box.placement_preferences[graph.nodes.index(self)])
+                    box.placement_preferences[graph.nodes.index(self)] = min(box.placement_preferences[graph.nodes.index(self)], 3 * aa_graphMap_node_simulation.MAX_DISTANCE_SET)
+                    print('New placement preference', graph.boxes.index(box), box.placement_preferences[graph.nodes.index(self)])
         self.pheromones[-1] = concentration

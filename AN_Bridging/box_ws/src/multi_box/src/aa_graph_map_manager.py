@@ -22,7 +22,7 @@ class Graph_Map_Manager(object):
     def __init__(self, num_agents):
         """ Data Analysis for Classification """
         self.data_analyzer = Analysis(path)
-        self.prob_threshold = .7
+        self.prob_threshold = .5
         self.episode = None
 
         """ Topics for V-REP episode management """
@@ -30,7 +30,7 @@ class Graph_Map_Manager(object):
         rospy.Subscriber('/starting', Int16, self.receive_episode_number, queue_size=1)
 
         """ Training Classifiers """
-        self.rf = self.data_analyzer.get_classifiers(estimators=200, depth=5)
+        self.rf = self.data_analyzer.get_classifiers(estimators=1000, depth=10)
         self.classifier = self.rf
 
         """ Initializing Map and Relevant Variables"""
@@ -87,45 +87,48 @@ class Graph_Map_Manager(object):
         self.restart_publisher = rospy.Publisher("/restart", Int8, queue_size=1)
         self.robot_steps = [0 for i in range(self.num_agents)]
         self.curr_episode = 1
-        self.max_steps = 50
-        self.max_episodes = 30
-        self.max_time_in_seconds = 800  # just in case the policy doesn't do very well or something goes wrong...
+        self.max_steps = 50 # 50
+        self.max_episodes = 20
+        self.max_time_in_seconds = 1600 # 1600 # just in case the policy doesn't do very well or something goes wrong...
         self.total_steps = []
         self.success = []
 
         """ While Loop to Replace rospy.spin() because visualizer needs to be called in main loop """
         start = time.time()
+        time_last_update = time.time()
         while True:
-            rospy.wait_for_message('/robot_finished', Int16)
-            self.visualizer.update_display_graph_using_current_environment(self.display_graph, self.episode)
-            reached_goal = [self.has_reached_goal(robot_id) for robot_id in range(self.num_agents)]
-            curr_time = time.time() - start
-            if not all(reached_goal):
-                steps = min([self.robot_steps[robot_id] for robot_id in range(self.num_agents) if not reached_goal[robot_id]])
-                print('Until episode termination: ', max(float(steps / float(self.max_steps)), curr_time / float(self.max_time_in_seconds)))
-                timed_out = steps > self.max_steps or curr_time > self.max_time_in_seconds
-            else:
-                steps = max(self.robot_steps)
-                timed_out = False
-            if all(reached_goal) or timed_out:
-                self.restart_publisher.publish(Int8(1))
-                self.receive_time_is_up(1)
-                self.curr_episode += 1
-                self.total_steps.append(steps if curr_time <= self.max_time_in_seconds else self.max_steps)
-                self.success.append(all(reached_goal))
-                start = time.time()
-                print('')
-                print('Running total steps: ', self.total_steps)
-                print('')
-                print('Running success: ', self.success)
-                print('')
-                self.robot_steps = [0 for i in range(self.num_agents)]
-                rospy.wait_for_message('/starting', Int16)
-                time.sleep(1)
-                for i in range(self.num_agents):
-                    self.receive_finish_indicator_from_robot(Int16(i))
-            if self.curr_episode > self.max_episodes:
-                break
+            time_since_last_update = time.time() - time_last_update
+            if time_since_last_update > 2:
+                time_last_update = time.time()
+                self.visualizer.update_display_graph_using_current_environment(self.display_graph, self.episode)
+                reached_goal = [self.has_reached_goal(robot_id) for robot_id in range(self.num_agents)]
+                curr_time = time.time() - start
+                if not all(reached_goal):
+                    steps = min([self.robot_steps[robot_id] for robot_id in range(self.num_agents) if not reached_goal[robot_id]])
+                    print('Until episode termination: ', max(float(steps / float(self.max_steps)), curr_time / float(self.max_time_in_seconds)))
+                    timed_out = steps > self.max_steps or curr_time > self.max_time_in_seconds
+                else:
+                    steps = np.mean(self.robot_steps)
+                    timed_out = False
+                if all(reached_goal) or timed_out:
+                    self.restart_publisher.publish(Int8(1))
+                    self.receive_time_is_up(1)
+                    self.curr_episode += 1
+                    self.total_steps.append(min(steps, self.max_steps) if curr_time <= self.max_time_in_seconds else self.max_steps)
+                    self.success.append(float(sum(reached_goal)) / self.num_agents)
+                    start = time.time()
+                    print('')
+                    print('Running total steps: ', self.total_steps)
+                    print('')
+                    print('Running success: ', self.success)
+                    print('')
+                    self.robot_steps = [0 for i in range(self.num_agents)]
+                    rospy.wait_for_message('/starting', Int16)
+                    time.sleep(1)
+                    for i in range(self.num_agents):
+                        self.receive_finish_indicator_from_robot(Int16(i))
+                if self.curr_episode > self.max_episodes:
+                    break
 
         self.data_to_txt(data=self.total_steps,
                          path='/home/jimmy/Documents/Research/AN_Bridging/results/stigmergic_node_data/total_steps.txt')
@@ -198,12 +201,14 @@ class Graph_Map_Manager(object):
 
     def receive_finish_indicator_from_robot(self, msg):
         """ Receive indicator from robot that it has reached its assigned location. Assign it a new one. """
+        rospy.sleep(1)
         robot_id = msg.data
-        self.robot_steps[robot_id] += 1
         if self.map.robots[robot_id].current_node:
             self.map.update_agent_location(robot_id, self.most_recently_assigned_positions[robot_id])
         if self.has_reached_goal(robot_id):
             self.agent_to_shut_down[robot_id].publish(Int16(1))
+            msg = Vector3(x=-1, y=self.map.nodes.index(self.map.goal), z=self.map.nodes.index(self.map.goal))
+            self.agent_to_target_pubs[robot_id].publish(msg)
         else:
             self.send_target_to_robot_in_vrep(robot_id)
 
@@ -215,11 +220,15 @@ class Graph_Map_Manager(object):
     def send_target_to_robot_in_vrep(self, robot_id):
         """ Send new target node index to agent. Sent to VREP client. """
         target_node_index, reference_node_index, box_index, pheromone = self.get_new_target_from_map(robot_id)
-        if type(target_node_index) != int and not target_node_index:
-            return
         print(' Sending robot ', robot_id, ' to ', target_node_index, ' using pheromone: ', pheromone, '   Explore: ', self.map.robots[robot_id].explore)
-        self.most_recently_assigned_positions[robot_id] = target_node_index
-        msg = Vector3(x=box_index, y=target_node_index, z=reference_node_index)
+        if type(target_node_index) != int and not target_node_index:
+            msg = Vector3(x=-1, y=self.map.nodes.index(self.map.robots[robot_id].current_node), z=self.most_recently_assigned_positions[robot_id])
+        else:
+            self.most_recently_assigned_positions[robot_id] = target_node_index
+            msg = Vector3(x=box_index, y=target_node_index, z=reference_node_index)
+            if target_node_index != self.map.nodes.index(self.map.robots[robot_id].current_node):
+                # ONLY COUNT if we actually move!
+                self.robot_steps[robot_id] += 1
         self.agent_to_target_pubs[robot_id].publish(msg)
 
     def get_new_target_from_map(self, robot_id):
@@ -244,7 +253,7 @@ class Graph_Map_Manager(object):
 
     def prob_succeed(self, state):
         predicted_to_succeed = self.classifier.predict_proba(np.array(state)).flatten()[1]
-        print('Probability push succeed: ', predicted_to_succeed)
+        # print('Probability push succeed: ', predicted_to_succeed)
         return predicted_to_succeed
 
 

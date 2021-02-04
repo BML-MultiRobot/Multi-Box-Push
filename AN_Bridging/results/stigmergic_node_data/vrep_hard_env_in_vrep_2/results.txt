@@ -1,0 +1,10 @@
+total steps:
+
+mean: 80
+standard deviation: 0
+
+
+proportion of robots succeed:
+
+mean: .5
+stanard deviation: 0

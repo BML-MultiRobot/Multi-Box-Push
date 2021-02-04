@@ -8,20 +8,18 @@ import vrep
 import time
 
 # VREP_SCENES = [('elevated_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_simulation.ttt'),
-#                ('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt'),
-#                ('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt')]
+#                 ('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt'),
+#                 ('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt') ]
 
-# """
 # ('elevated_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_simulation.ttt')
 # ('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt')
-# ('elevated_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_simulation.ttt'),
-# ('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt') """
+# ('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt')
 # # [('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt')]
 # """[('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt')]"""
 # """[('elevated_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_simulation.ttt')]"""
 # """('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt'),
 # ('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt')]"""
-VREP_SCENES = [('stigmergic_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/stigmergic_simulation1.ttt')]
+VREP_SCENES = [('stigmergic_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/stigmergic_simulation2.ttt')]
 
 class Manager():
     def __init__(self):
@@ -45,7 +43,7 @@ class Manager():
                 #time.sleep(60)
             else:
                 time.sleep(3)
-            simulation_index = np.random.choice(range(len(VREP_SCENES)))# p=[.5, .25, .25])
+            simulation_index = np.random.choice(range(len(VREP_SCENES)))# , p=[.5, .3, .2])
             sim_name, sim_path = VREP_SCENES[simulation_index]
             msg = String()
             msg.data = sim_name
@@ -86,7 +84,7 @@ class Manager():
         return
 
 
-episodes = 10000
+episodes = 1200
 
 
 if __name__ == "__main__":

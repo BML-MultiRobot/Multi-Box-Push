@@ -46,9 +46,9 @@ class Hierarchy_MBRL_Task(Task):
         self.max_steps = 100 # 50
         self.num_steps = 0
 
-        self.reward_stop = np.inf  # once average test return of past 40 tests reaches this value, we stop training
+        self.reward_stop = np.inf# 3.2  # once average test return of past 40 tests reaches this value, we stop training
 
-        self.mode = 'GET_STATE_DATA' # '' #'GET_METRIC' #
+        self.mode = 'GET_STATE_DATA' #'GET_METRIC' #'GET_STATE_DATA' #''
         self.num_gather_data = 10000  # how many data points gather for classification
         self.controller = HierarchicalController()
         self.simulation_name = None
@@ -261,11 +261,11 @@ class Hierarchy_MBRL_Task(Task):
         assert type(self.simulation_name) == str
         if self.has_box_in_simulation:
             if self.simulation_name == 'elevated_scene':
-                return dist(s[:2], s[5:7]) < .5 and self.box_z_global < .2 and self.bot_z_global > .3
+                return dist(s[:2], s[5:7]) < .3 and self.box_z_global < .2 and self.bot_z_global > .3
             if self.simulation_name == 'flat_scene':
-                return dist(s[:3], s[5:8]) < .5
+                return dist(s[:3], s[5:8]) < .3 and abs(self.box_ori_global) < .3  # last part is added
             if self.simulation_name == 'slope_scene':
-                return dist(s[:3], s[5:8]) < .5
+                return dist(s[:3], s[5:8]) < .3 and abs(self.box_ori_global) < .3  # last part is added
         else:
             return dist(s[5: 8], np.zeros(3)) < .2
 
@@ -340,16 +340,15 @@ class Hierarchy_MBRL_Task(Task):
         if self.mode == 'GET_STATE_DATA':
             self.data_to_txt(data=self.data, path =  '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/state_data.txt')
             self.data_to_txt(data=self.testing_rewards, path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/post_training_testing_rewards.txt')
-            sys.exit(0)
         elif self.mode == 'GET_METRIC':
             self.data_to_txt(data=self.data, path='/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/success.txt')
             self.data_to_txt(data=self.testing_rewards, path='/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/post_training_testing_rewards.txt')
-            sys.exit(0)
         else:
             self.agent.saveModel()
             self.data_to_txt(data = self.rewards, path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/rewards.txt')
             self.data_to_txt(data = self.testing_rewards, path = '/home/jimmy/Documents/Research/AN_Bridging/results/policy_training_data/testing_rewards.txt')
-    
+        sys.exit(0)
+
     def plotLoss(self):
         loss = self.agent.loss
         plt.plot(range(len(loss)), loss, label='Training')

@@ -36,35 +36,49 @@ class Agent_Manager(object):
         self.counter = 0
         self.shut_down = False
         self.sleep_duration = 5
-        self.box_distance_finished_condition = .5 # These were the parameters used in training
-        self.marker_distance_finished_condition = .5
+        self.box_distance_finished_condition = .4 # These was not the parameter used in training
+        self.marker_distance_finished_condition = .4 # These were the parameters used in training
         print(' Robot number:', robot_id, ' is ready!')
         rospy.wait_for_message('/map_is_ready', Int16)  # just wait for the message indicator
         self.publish_finished_to_map()
+        self.waiting_for_target = False
         rospy.spin()
         return
 
     def receive_state_info(self, msg):
-        if self.counter == 0:
-            state = np.array(vrep.simxUnpackFloats(msg.data))
-            self.controller.goal = state.ravel()[:2]
-            if self.finished(state):
-                if not self.shut_down and (not self.is_not_pushing_box(state)) and state[7] < -.25 and dist(state[5:7], np.zeros(2)) < 1: # hole
-                    msg = Vector3()
-                    msg.x = -2
-                    msg.y = -2
-                    self.pub.publish(msg)
-                else:
-                    if not self.shut_down:
-                        self.publish_finished_to_map()
-                    msg = Vector3()
-                    msg.x = 1
-                    msg.y = 1
-                    self.pub.publish(msg)
+        state = np.array(vrep.simxUnpackFloats(msg.data))
+        if self.shut_down:
+            msg = Vector3()
+            msg.x = 1
+            msg.y = 1
+            self.pub.publish(msg)
+        elif self.finished(state):
+            if (not self.is_not_pushing_box(state)) and state[7] < -.25 and dist(state[5:7], np.zeros(2)) < 1:  # hole
+                msg = Vector3()
+                msg.x = -2
+                msg.y = -2
             else:
+                msg = Vector3()
+                msg.x = 0
+                msg.y = 0
+            self.pub.publish(msg)
+
+        if self.counter == 0 and not self.shut_down:
+            if self.finished(state):
+                if not self.waiting_for_target:
+                    rospy.sleep(1)
+                    self.publish_finished_to_map()
+                    self.waiting_for_target = True
+                    rospy.wait_for_message("/target" + str(self.robot_id), Vector3)
+                    self.waiting_for_target = False
+            else:
+                self.controller.goal = state.ravel()[:2]
                 if self.is_not_pushing_box(state):
-                    action_index = 0 if abs(state[6]) > .4 else 1 # align yourself otherwise travel towards node
+                    action_index = 0 if abs(state[6]) > .5 else 1 # align yourself otherwise travel towards node
                 else:
+                    if any(np.isnan(state)):
+                        print(state)
+                    assert not any(np.isnan(state))
                     action_index = self.policy.get_action(state, testing_time=True, probabilistic=True)
                 action_name = action_map[action_index]
                 adjusted_state_for_controls = self.controller.feature_2_task_state(state)
@@ -82,11 +96,14 @@ class Agent_Manager(object):
 
     def finished(self, state):
         if self.is_not_pushing_box(state):
-            return dist(state[5:8], np.zeros(3)) < self.marker_distance_finished_condition
+            flat = state.flatten()
+            if flat[7] < -.25:
+                return dist(state[5:7], np.zeros(2)) < .4
+            return dist(state[5:8], np.zeros(3)) < .3
         else:
             flat = state.flatten()
-            if flat[7] < -.25: # hole
-                return dist(state[:3], state[5:8]) < self.box_distance_finished_condition and abs(flat[2] - flat[7]) < .2
+            if flat[7] < -.2: # hole
+                return flat[2] < -.15 # and dist(state[:2], state[5:7]) < self.box_distance_finished_condition
             return dist(state[:3], state[5:8]) < self.box_distance_finished_condition
 
     def publish_finished_to_map(self):
