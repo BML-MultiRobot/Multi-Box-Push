@@ -1,0 +1,10 @@
+<launch>
+    <!-- recursive launch file to start up many robot nodes -->
+    <arg name="num_bots" default="1"/>
+
+    <node pkg = "multi_cla" type = "multiagent_coordinator.py" name = "policy" output = 'screen'>
+        <param name= "num_bots" value="$(eval arg('num_bots'))"/>
+    </node>
+
+    <node pkg = "multi_cla" type = "manager.py" name = "manager" output = "screen"/>
+</launch>

@@ -1,0 +1,8 @@
+prefix=/home/jimmy/Documents/Research/CLA/cla_ws/install
+
+Name: multi_cla
+Description: Description of multi_cla
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib 
+Requires: geometry_msgs rospy std_msgs message_runtime

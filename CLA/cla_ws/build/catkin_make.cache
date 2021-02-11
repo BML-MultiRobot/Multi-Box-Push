@@ -1,0 +1,2 @@
+multi_cla:sim_ros_interface
+-DCMAKE_BUILD_TYPE=Release -DCATKIN_DEVEL_PREFIX=/home/jimmy/Documents/Research/CLA/cla_ws/devel -DCMAKE_INSTALL_PREFIX=/home/jimmy/Documents/Research/CLA/cla_ws/install -G Unix Makefiles

@@ -6,26 +6,21 @@ import torch
 import rospy
 from collections import OrderedDict
 
-from Tasks.decomposeTask import DecomposeTask
-from Algs.doubleQ import DoubleQ
 from Tasks.hierarchy_MBRL_task import Hierarchy_MBRL_Task
-from Tasks.planner import Planner
 from aa_graphMap_node_simulation import stigmergic_main
-# from aa_graph_map_manager import Graph_Map_Manager
 from Algs.hierarchical_MBRL import Hierarchical_MBRL
 
 NAME = 'bot'
 
 algs = {
-    5: 'MBRL',
-    6: 'STIGMERGIC',
-    7: 'TEST'
+    0: 'SINGLE',
+    1: 'STIGMERGIC'
 }
-ALGORITHM = 5
+ALGORITHM = 1
 description = algs[ALGORITHM]
 rospy.init_node('Dummy', anonymous=True)
 
-if description == 'MBRL':
+if description == 'SINGLE':
     NAME = 'a_bot'
     agents = OrderedDict({
                 #ensure ordering matches ros message
@@ -170,8 +165,4 @@ if description == 'STIGMERGIC':
 
     stigmergic_main(nodes, inclusions, exclusions, box, robot, goal)
 
-if description == 'TEST':
-    Graph_Map_Manager()
-
-while True:
-    x = 1+1
+rospy.spin()
