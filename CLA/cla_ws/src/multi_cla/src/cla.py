@@ -4,16 +4,33 @@ import numpy as np
 
 
 class CLA:
-    def __init__(self, states, num_actions):
+    def __init__(self, state_indicators, num_actions, a, b):
         # Learning rates
-        self.b = None
-        self.a = None
+        self.b = b
+        self.a = a
+
+        states = self.recursive_state_add(state_indicators, 0)
+        print(states)
+        assert len(set(list(states))) == 128 or len(set(list(states))) == 16 # the only two that are supported
 
         # Policy mapping strings to automata policy
         self.num_actions = num_actions
-        self.policy = {s: [.5] * num_actions for s in states}
+        self.policy = {s: [1.0/num_actions] * num_actions for s in states}
         self.indices = np.arange(num_actions)
         return
+
+    def recursive_state_add(self, state_indicators, curr_element_index):
+        values = state_indicators[curr_element_index]
+        if curr_element_index == len(state_indicators) - 1:
+            return np.array(values) * (10 ** curr_element_index)
+
+        rest = self.recursive_state_add(state_indicators, curr_element_index + 1)
+        result = []
+        for v in values:
+            factor = (10**curr_element_index) * v
+            curr = rest + factor
+            result.append(curr)
+        return np.array(result).flatten()
 
     def update_policy(self, s, a, global_s, global_a, robot_ids, reward_net):
         """ s: integer input encoding state

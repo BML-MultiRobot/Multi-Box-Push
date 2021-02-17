@@ -41,10 +41,10 @@ class RewardNetwork(nn.Module):
             Input to the neural network: all the states, filter action without index robot_id, robot_id
             Output: rewards for each of the actions robot_id can take given current state and other robot actions """
         a_minus_bot = self.delete_indices(a, robot_ids)
-        s, a_minus_bot, robot_ids = torch.from_numpy(s), torch.from_numpy(a_minus_bot), torch.from_numpy(robot_ids)
-        x = torch.cat((s, a_minus_bot, robot_ids), dim=1)
+        s, a_minus_bot, robot_ids = torch.from_numpy(s), torch.from_numpy(a_minus_bot), torch.from_numpy(robot_ids.reshape(-1, 1))
+        x = torch.cat((s.float(), a_minus_bot.float(), robot_ids.float()), dim=1)
         for i in range(self.n_layers):
-            x = eval(('F.ReLU' + '(self.fc{}(x))').format(i + 1))
+            x = eval(('F.relu' + '(self.fc{}(x))').format(i + 1))
 
         return self.output(x)
 
@@ -56,7 +56,7 @@ class RewardNetwork(nn.Module):
 
     def forward_from_numpy_particular_action(self, s, a, robot_ids):
         output = self.forward_from_numpy_all_actions(s, a, robot_ids)
-        return torch.gather(output, 1, robot_ids)
+        return torch.gather(output, 1, torch.from_numpy(robot_ids.reshape(-1, 1)))
 
     def predict(self, s, a, robot_ids):
         return self.forward(s, a, robot_ids).detach()
@@ -87,10 +87,11 @@ class RewardNetwork(nn.Module):
         return r
 
     def update(self, s, a, robot_ids, r):
+        s, a, robot_ids, r = np.array(s), np.array(a), np.array(robot_ids), np.array(r)
         values = self.forward_from_numpy_particular_action(s, a, robot_ids)
 
         criterion = nn.MSELoss()
-        loss = criterion(values, r)
+        loss = criterion(values.squeeze(), torch.from_numpy(r.flatten()).float())
 
         self.optimizer.zero_grad()
         loss.backward()

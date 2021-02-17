@@ -1,13 +1,12 @@
 from collections import namedtuple
 import numpy as np
 
-Transition = namedtuple('Transition', ('local_state', 'local_action', 'local_index', 'global_state', 'global_action'))
+Transition = namedtuple('Transition', ('local_state', 'local_action', 'robot_id', 'global_state', 'global_action'))
 
 
 class PolicyMemory(object):
     def __init__(self, size=10000):
         self.memory = []
-        self.position = 0
         self.size = size
 
     def push(self, local_state, local_action, local_index, global_state, global_action):
@@ -24,6 +23,7 @@ class PolicyMemory(object):
         """ Get the samples from the entire replay. Not necessarily contiguous
             (because retrieving samples from multiple agents). """
         transitions = Transition(*zip(*self.memory))
+        self.memory = []
         return transitions
 
     def __len__(self):

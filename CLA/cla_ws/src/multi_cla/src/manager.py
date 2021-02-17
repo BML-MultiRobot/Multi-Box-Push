@@ -54,15 +54,10 @@ class Manager():
 
             # Wait for signal to stop
             while not self.restart:
-                restart = rospy.wait_for_message('/restart', Int8)
-                self.restart = restart if restart == 1 else self.restart
+                x = 1 + 1
 
             # Stop and restart simulation
             simxStopSimulation(client_id, simx_opmode_oneshot)
-            is_running = True
-            while is_running:
-                error_code, server_state = simxGetInMessageInfo(client_id, simx_headeroffset_server_state)
-                is_running = server_state & 1
             counter += 1
 
         # Finished all episodes
@@ -72,6 +67,7 @@ class Manager():
         fin.publish(msg)
 
     def receive_status(self, message):
+        self.restart = message.data if message.data == 1 else self.restart
         return
 
 
