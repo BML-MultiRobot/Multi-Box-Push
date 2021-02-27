@@ -2,19 +2,23 @@
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-from collections import OrderedDict
+import torch.optim as optim
 import numpy as np
 
 
 class RewardNetwork(nn.Module):
-    def __init__(self, neurons, lr):
+    def __init__(self, neurons, lr, num_actions, num_bots, coma_infra, boltzmann=25, noise=.02):
         super(RewardNetwork, self).__init__()
         self.layers, self.neurons = [], neurons
         self.n_layers = len(self.neurons) - 2
+        self.num_actions = num_actions
+        self.num_bots = num_bots
+        self.coma_infra = coma_infra
         self.output = None
         self.lr = lr
+        self.noise_std = noise
+        self.boltzmann = boltzmann
 
         self.createFeatures()
 
@@ -40,26 +44,56 @@ class RewardNetwork(nn.Module):
 
             Input to the neural network: all the states, filter action without index robot_id, robot_id
             Output: rewards for each of the actions robot_id can take given current state and other robot actions """
-        a_minus_bot = self.delete_indices(a, robot_ids)
-        s, a_minus_bot, robot_ids = torch.from_numpy(s), torch.from_numpy(a_minus_bot), torch.from_numpy(robot_ids.reshape(-1, 1))
-        x = torch.cat((s.float(), a_minus_bot.float(), robot_ids.float()), dim=1)
+        num_bots = a.shape[1]
+        if self.coma_infra:
+            if num_bots > 1:
+                a_minus_bot = self.delete_indices(a, robot_ids)
+                a_minus_bot = (a_minus_bot - (self.num_actions / 2.0)) / (self.num_actions / 2.0)  # normalize
+                s, a_minus_bot, robot_ids = torch.from_numpy(s), torch.from_numpy(a_minus_bot), torch.from_numpy(robot_ids.reshape(-1, 1))
+                normed_robot_ids = (robot_ids - (self.num_bots / 2.0)) / (self.num_bots / 2.0)
+                x = torch.cat((s.float(), a_minus_bot.float(), normed_robot_ids.float()), dim=1)
+            else:
+                s, robot_ids = torch.from_numpy(s), torch.from_numpy(robot_ids.reshape(-1, 1))
+                normed_robot_ids = (robot_ids - (self.num_bots / 2.0)) / (self.num_bots / 2.0)
+                x = torch.cat((s.float(), normed_robot_ids.float()), dim=1)
+            return self.forward(x)
+        else:
+            output = None
+            a = a.copy()
+            for i in range(self.num_actions):
+                a[range(a.shape[0]), robot_ids] = i
+                curr_s, curr_a = torch.from_numpy(s), torch.from_numpy(a)
+                curr_a = (curr_a - (self.num_actions / 2.0)) / (self.num_actions / 2.0)
+                x = torch.cat((curr_s.float(), curr_a.float()), dim=1)
+                curr_out = self.forward(x)
+                if i == 0:
+                    output = curr_out
+                else:
+                    output = torch.cat((output, curr_out), dim=1)
+            return output
+
+
+    def forward(self, x):
         for i in range(self.n_layers):
             x = eval(('F.relu' + '(self.fc{}(x))').format(i + 1))
-
         return self.output(x)
 
-    def delete_indices(self, s, indices):
-        size = s.shape[1]
+    def delete_indices(self, a, indices):
+        size = a.shape[1]
         indices = [(i * size) + val for i, val in enumerate(indices)]
-        s = np.delete(s, indices, axis=None) # flattened
+        s = np.delete(a, indices, axis=None)  # flattened
         return s.reshape(-1, size-1)
 
     def forward_from_numpy_particular_action(self, s, a, robot_ids):
-        output = self.forward_from_numpy_all_actions(s, a, robot_ids)
-        return torch.gather(output, 1, torch.from_numpy(robot_ids.reshape(-1, 1)))
-
-    def predict(self, s, a, robot_ids):
-        return self.forward(s, a, robot_ids).detach()
+        if self.coma_infra:
+            output = self.forward_from_numpy_all_actions(s, a, robot_ids)
+            particular_actions = torch.gather(torch.from_numpy(a), 1, torch.from_numpy(robot_ids).reshape(-1, 1))
+            return torch.gather(output, 1, particular_actions)
+        else:
+            s, a = torch.from_numpy(s), torch.from_numpy(a)
+            a = (a - (self.num_actions / 2.0)) / (self.num_actions / 2.0)
+            x = torch.cat((s.float(), a.float()), dim=1)
+            return self.forward(x)
 
     def get_advantage(self, s, a, robot_ids, p):
         """ s: n x d array of global states
@@ -70,24 +104,35 @@ class RewardNetwork(nn.Module):
             Output: beta values for each action (0 to 1), 1 being most favorable """
         p = torch.from_numpy(p)
         output = self.forward_from_numpy_all_actions(s, a, robot_ids)
-        expected_value = torch.sum(output * p, dim=1)
+        expected_value = torch.sum(output * p, dim=1).unsqueeze(1)
 
         advantages = output - expected_value
-        minimum = torch.min(advantages, dim=1)
-        advantages = advantages - minimum
+        minimum, _ = torch.min(advantages, dim=1)
+        minimum = minimum.unsqueeze(1)
+        advantages = advantages - minimum + 1
+
+        advantages = torch.exp(advantages * self.boltzmann)
+
         maximum, _ = torch.max(advantages, dim=1)
+        maximum = maximum.unsqueeze(1)
 
         normalized = advantages / maximum
-        normalized = torch.gather(normalized, 1, robot_ids).detach().numpy()
+        robot_ids = torch.from_numpy(robot_ids).unsqueeze(1)
+        particular_actions = torch.gather(torch.from_numpy(a), 1, robot_ids)
+        normalized = torch.gather(normalized, 1, particular_actions).detach().numpy()
 
-        unnormalized = torch.gather(advantages, 1, robot_ids).detach().numpy()
+        unnormalized = (torch.gather(advantages, 1, particular_actions) - (maximum / 2) + .5).detach().numpy()
         maximum = maximum.detach().numpy()
 
-        r = np.where(maximum > 1.0, normalized, unnormalized)
-        return r
+        # r = np.where(maximum > 1.0, normalized, unnormalized)
+        r = normalized
+        return r.flatten()
 
     def update(self, s, a, robot_ids, r):
         s, a, robot_ids, r = np.array(s), np.array(a), np.array(robot_ids), np.array(r)
+
+        if self.noise_std > 0:
+            s = s + np.random.normal(0, self.noise_std, s.shape)
         values = self.forward_from_numpy_particular_action(s, a, robot_ids)
 
         criterion = nn.MSELoss()
@@ -96,4 +141,13 @@ class RewardNetwork(nn.Module):
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        return
+        return loss.item()
+
+    def train_single_transition(self, transition):
+        return self.update(transition.global_state, transition.global_action, transition.robot_id, transition.reward)
+
+    def train_multiple_transitions(self, transition_list):
+        losses = []
+        for transition in transition_list:
+            losses.append(self.train_single_transition(transition))
+        return np.mean(losses)

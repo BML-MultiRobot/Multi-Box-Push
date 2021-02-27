@@ -15,12 +15,13 @@ class Manager():
         # ROS Publishers
         fin = rospy.Publisher('/finished', Int8, queue_size=1)
         report_sim = rospy.Publisher('/simulation', String, queue_size=1)
-        starting = rospy.Publisher('/starting', Int16, queue_size=1)
+        rospy.Subscriber("/start", Int8, self.receive_ready, queue_size=1)
 
         # ROS Subscriber
         rospy.Subscriber("/restart", Int8, self.receive_status, queue_size=1)
 
         # V-REP Client Start
+        self.start = False
         simxFinish(-1)  # clean up the previous stuff
         client_id = simxStart('127.0.0.1', 19997, True, True, 5000, 5)
         if client_id == -1:
@@ -30,6 +31,8 @@ class Manager():
         # EPISODE TRACKING
         counter = 0
         while counter < episodes:
+            while not self.start:
+                x = 1 + 1
             print("Episode Number ", counter + 1)
             time.sleep(3)
 
@@ -47,10 +50,10 @@ class Manager():
             while r != 0:
                 r = simxStartSimulation(client_id, simx_opmode_oneshot)
 
+            self.start = False
+            self.restart = False
             msg = Int16()
             msg.data = counter + 1
-            starting.publish(msg)
-            self.restart = False
 
             # Wait for signal to stop
             while not self.restart:
@@ -70,8 +73,12 @@ class Manager():
         self.restart = message.data if message.data == 1 else self.restart
         return
 
+    def receive_ready(self, message):
+        self.start = True
+        return
 
-episodes = 100
+
+episodes = 300
 
 
 if __name__ == "__main__":
