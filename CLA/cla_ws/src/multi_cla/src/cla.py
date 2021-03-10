@@ -40,29 +40,55 @@ class CLA:
             result.append(curr)
         return np.array(result).flatten()
 
-    def update_policy(self, s, a, next_s, next_a, global_s, global_a, robot_ids, done, reward_net):
+    def update_policy(self, rollouts, reward_net):
+        if self.q_learn:
+            self.update_q_values(rollouts, reward_net)
+        for r in rollouts:
+            self.update_policy(r, reward_net)
+
+    def update_q_values(self, rollouts, reward_net):
+        # All inputs are in order of sampling meaning we can do Q-value estimates directly
+        s_a = {}
+        for r in rollouts:
+            s, a, next_s, next_a, global_s, global_a, robot_ids, done = CLA.unpack(r)
+            num_samples = s.shape[0]
+            p = np.array([self.softmax(state).detach().numpy() for state in s])
+            advantages = reward_net.get_advantage(global_s, global_a, robot_ids, p, normalize=False)
+            q = self.q_value_estimate(next_s, next_a, advantages, 1 - done)
+
+            for i in range(num_samples):
+                if (s[i], a[i]) in s_a:
+                    s_a[(s[i], a[i])].append(q[i])
+                else:
+                    s_a[(s[i], a[i])] = [q[i]]
+
+        for s_a_pair, q_target in s_a.items():
+            state, action = s_a_pair
+            self.q_values[state][action] = np.mean(q_target)
+
+    @staticmethod
+    def unpack(p_trans):
+        s = np.array(p_trans.local_state)
+        a = np.array(p_trans.local_action)
+        next_s = np.array(p_trans.next_state)
+        next_a = np.array(p_trans.next_action)
+        global_s = np.array(p_trans.global_state)
+        global_a = np.array(p_trans.global_action)
+        robot_ids = np.array(p_trans.robot_id)
+        done = np.array(p_trans.done)
+        return s, a, next_s, next_a, global_s, global_a, robot_ids, done
+
+    def _update_policy(self, p_trans, reward_net):
         """ s: integer input encoding state
             a: index denoting action
 
             On-policy updates based on single rollout/trajectory
         """
-        s, a, global_s, global_a, robot_ids, done = np.array(s), np.array(a), np.array(global_s), np.array(global_a), np.array(robot_ids), np.array(done)
-        next_s = np.array(next_s)
+        s, a, next_s, next_a, global_s, global_a, robot_ids, done = CLA.unpack(p_trans)
 
         if self.q_learn:
-            # All inputs are in order of sampling meaning we can do Q-value estimates directly
-            p = np.array([self.softmax(state).detach().numpy() for state in s])
-            advantages = reward_net.get_advantage(global_s, global_a, robot_ids, p, normalize=False)
-            q = self.q_value_estimate(next_s, next_a, advantages, 1-done)
             num_samples = s.shape[0]
             s_a = {(s[i], a[i]): [] for i in range(num_samples)}
-            for i in range(num_samples):
-                s_a[(s[i], a[i])].append(q[i])
-
-            for s_a_pair, q_target in s_a.items():
-                state, action = s_a_pair
-                self.q_values[state][action] = np.mean(q_target)
-
             loss = torch.zeros(1)
             for s_a_pair, q_target in s_a.items():
                 state, action = s_a_pair

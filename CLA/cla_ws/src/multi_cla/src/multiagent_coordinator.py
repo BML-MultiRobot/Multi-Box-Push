@@ -17,7 +17,7 @@ from env_util import to_state_id, save_data
 
 
 Agent = namedtuple('Agent', ['x', 'y', 'ori', 'id'])
-Target = namedtuple('Target', ['x', 'y'])
+Target = namedtuple('Target', ['radians', 'dist'])
 Sample = namedtuple('Sample', ('state', 'action'))
 
 
@@ -28,7 +28,7 @@ class MultiAgent:
         self.locations = [(0, 0)] * num_agents  # maps robot id to current location tuple
         self.orientations = [0] * num_agents
         self.ball_location, self.prev_ball, self.ball_start = (0, 0), None, (0, 0)
-        self.action_map = {0, 1}
+        self.action_map = {0, 1, 2, 3}# {0, 1}
 
         """ ROS Subscriptions and Publishers """
         self.target_publishers = {i: rospy.Publisher("/goalPosition" + str(i), Vector3, queue_size=1) for i in range(num_agents)}
@@ -58,9 +58,7 @@ class MultiAgent:
         self.policy_buffer = PolicyMemory()
 
         """ Policy CLA Parameters"""
-        # state_indicators = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1, 2, 3]]
-        state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1], [0, 1, 2]]
-        # state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 2]]
+        state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1], [0, 1, 2], [0, 1], [0, 1]]
         self.policy = CLA(state_indicators, self.u_n, params['a'], params['b'], params['q_learn'], params['gamma'], params['td_lambda'],
                           params['explore'], params['explore_decay'], params['min_explore'])
         self.policy_epochs = params['policy_epochs']
@@ -91,7 +89,7 @@ class MultiAgent:
         """ targets: dictionary mapping robot id to global, goal location """
         for id, target in targets.items():
             pub = self.target_publishers[id]
-            msg = Vector3(target.x, target.y * self.rim_size, 0)
+            msg = Vector3(target.radians, target.dist, 0)
             pub.publish(msg)
         return
 
@@ -196,9 +194,9 @@ class MultiAgent:
             for i in range(self.policy_epochs):
                 sys.stdout.write("\r Policy Training Progress: %d%%" % (int(100 * (i + 1) / self.policy_epochs)))
                 sys.stdout.flush()
-                for r in rollouts:
-                    self.update_policy(r)
+                self.update_policy(rollouts)
             self.policy.update_explore()
+            print(self.policy.policy[11214], self.policy.q_values[11214], self.policy.policy[210], self.policy.q_values[210])
             print('Entropy: ', self.entropy[-1])
             print('')
 
@@ -212,10 +210,8 @@ class MultiAgent:
         reward_network_loss = self.reward_network.train_single_transition(r_trans)
         self.reward_network_loss.append(reward_network_loss)
 
-    def update_policy(self, p_trans):
-        average_entropy = self.policy.update_policy(p_trans.local_state, p_trans.local_action,
-                                                    p_trans.next_state, p_trans.next_action, p_trans.global_state,
-                                                    p_trans.global_action, p_trans.robot_id, p_trans.done, self.reward_network)
+    def update_policy(self, rollouts):
+        average_entropy = self.policy.update_policy(rollouts, self.reward_network)
         self.entropy.append(average_entropy)
 
     def reward_function(self, s, a, s_prime):
@@ -233,19 +229,23 @@ class MultiAgent:
         squared_distances = squared[::2] + squared[1::2]
         new_distance = np.sum(np.sqrt(squared_distances))
 
-        r_agent_distance = prev_distance - new_distance
-        # TODO: This is a test
         r_ball_forward = self.ball_location[0] - self.prev_ball[0]
         r_ball_side = abs(self.prev_ball[1]) - abs(self.ball_location[1])
-        return r_ball_forward * 5 + r_ball_side * 5  # + r_agent_distance
+        return r_ball_forward * 5 + r_ball_side * 5
 
     def action_step(self):
         """ Creates new targets for all agents and then sends to all agents """
         targets, local_states, actions = {}, {}, {}
+        local_states, location_indicators, allowed = to_state_id(self.num_agents, self.locations,
+                                                                  self.orientations, self.ball_location, self.near_ball)
         for i in range(self.num_agents):
-            local_states[i] = to_state_id(i, self.locations, self.orientations, self.ball_location, self.near_ball)
             actions[i] = self.policy.get_action(local_states[i])
-            targets[i] = Target(local_states[i] % 10, actions[i])
+            if actions[i] == 0 or actions[i] == 1 or (actions[i] == 2 and not allowed[i]['c']) or (actions[i] == 3 and not allowed[i]['cc']):
+                targets[i] = Target(location_indicators[i] * (np.pi/8), min(actions[i], 1) * self.rim_size)
+            elif actions[i] == 2:
+                targets[i] = Target(((location_indicators[i] - 1) % 16) * (np.pi/8), self.rim_size)
+            else:  # actions[i] == 3
+                targets[i] = Target(((location_indicators[i] + 1) % 16) * (np.pi / 8), self.rim_size)
         self.publish_targets(targets)
         return local_states, targets, actions
 
@@ -310,11 +310,11 @@ if __name__ == '__main__':
     num_agents = rospy.get_param('~num_bots')
     params = {
               # general parameters
-              'train_every': 1000, 'max_ep_len': 100, 'explore_steps': 2000,
+              'train_every': 1000, 'max_ep_len': 100, 'explore_steps': 3000,
 
               # reward network
               'reward_width': 300, 'reward_depth': 3, 'reward_lr': 3e-4,
-              'reward_batch': 250, 'rotation_invariance': False, 'epochs': 75,
+              'reward_batch': 250, 'rotation_invariance': True, 'epochs': 75,
               'noise_std': 0,
 
               # General Policy parameters
@@ -331,6 +331,6 @@ if __name__ == '__main__':
               'rim_size': .05,
 
               # exploration
-              'explore': 1, 'explore_decay': .5, 'min_explore': .05,
+              'explore': 1, 'explore_decay': .85, 'min_explore': .05,
               }
     agent = MultiAgent(num_agents, params)
