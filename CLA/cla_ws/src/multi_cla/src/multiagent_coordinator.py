@@ -51,35 +51,28 @@ class MultiAgent:
 
         """ Network Architecture """
         self.u_n = len(self.action_map)
-        if params['coma_infra']:
-            num_input_nodes = 3 * self.num_agents + 1  # Each agent: 2-d location, action index of all but 1. Then 1 robot id, ball y
-            neurons = [num_input_nodes] + [params['reward_width']] * params['reward_depth'] + [self.u_n]
-        else:
-            neurons = [3*self.num_agents + 1] + [params['reward_width']] * params['reward_depth'] + [1]
+        neurons = [3*self.num_agents + 1] + [params['reward_width']] * params['reward_depth'] + [1]
 
         """ Buffer Replays """
-        self.reward_buffer = RewardMemory(size=1e6, coma_infra=params['coma_infra'])
+        self.reward_buffer = RewardMemory(size=1e6)
         self.policy_buffer = PolicyMemory()
 
         """ Policy CLA Parameters"""
         # state_indicators = [[0, 1], [0, 1], [0, 1], [0, 1], [0, 1], [0, 1, 2, 3]]
-        # state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1], [0, 1, 2]]
-        state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 2]]
-        self.policy = CLA(state_indicators, self.u_n, params['a'], params['b'],
+        state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1], [0, 1, 2]]
+        # state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 2]]
+        self.policy = CLA(state_indicators, self.u_n, params['a'], params['b'], params['q_learn'], params['gamma'], params['td_lambda'],
                           params['explore'], params['explore_decay'], params['min_explore'])
-        self.policy_batch = params['policy_batch']
         self.policy_epochs = params['policy_epochs']
         self.rim_size = params['rim_size']
         self.near_ball = .225
         self.near_agent = .1
 
         """ Reward Network Parameters """
-        self.reward_network = RewardNetwork(neurons, params['reward_lr'], self.u_n, self.num_agents,
-                                            params['coma_infra'], params['boltzmann'], params['noise_std'])
+        self.reward_network = RewardNetwork(neurons, params['reward_lr'], self.u_n, self.num_agents, params['boltzmann'], params['noise_std'])
         self.rotation_invariant = params['rotation_invariance']
         self.train_every = params['train_every']
         self.reward_batch = params['reward_batch']
-        self.reward_offline = params['reward_net_offline']
         self.train_now = params['explore_steps']
         self.epochs = params['epochs']
 
@@ -87,28 +80,6 @@ class MultiAgent:
         self.reward_network_loss, self.entropy, self.episode_rewards, self.x_travel, self.y_travel = [], [], [], [], []
         self.entropy.append(self.policy.average_entropy())
         self.curr_reward = 0
-
-        if self.reward_offline:
-            # Load Memory
-            self.reward_buffer.load_data('/home/jimmy/Documents/Research/CLA/results/reward_state_action_data.pickle')
-            self.policy_buffer.load_data('/home/jimmy/Documents/Research/CLA/results/policy_state_action_data.pickle')
-
-            self.train(override=True)
-            plt.plot(range(len(self.reward_network_loss)), self.reward_network_loss)
-            plt.title('Reward Network Loss over Epochs')
-            plt.show()
-
-            for state, automata in self.policy.policy.items():
-                print('policy')
-                print(state, automata)
-
-            plt.plot(range(len(self.entropy)), self.entropy)
-            plt.title('Entropy over Epochs')
-            plt.show()
-
-            self.reward_buffer.clear(leave=self.train_now)
-            assert len(self.reward_buffer) == self.train_now
-            self.train_now = len(self.reward_buffer) + self.train_every
 
         rospy.sleep(3)
         self.pub_start.publish(Int8(1))
@@ -132,16 +103,22 @@ class MultiAgent:
         self.orientations[agent.id] = agent.ori
         self.steps[agent.id] += 1
         self.ball_start = self.ball_location if self.total_steps == 0 else self.ball_start
-        assert any(self.steps <= self.period)  # make sure each time step is accounted for
+        if not any(self.steps <= self.period):
+            sys.exit(0) # make sure each time step is accounted for
         if all(self.steps >= self.period):
-            if self.total_steps > self.episode_length:
+            states, targets, actions = self.action_step()
+            failed = self.failed()
+            if self.total_steps > self.episode_length or failed:
+                self.record(states, actions, done=int(failed), episode_end=int(True))
                 self.restart_protocol()
             else:
-                states, targets, actions = self.action_step()
                 self.steps = np.array([0] * num_agents)
                 self.total_steps += 1
                 self.record(states, actions)
         return
+
+    def failed(self):
+        return False
 
     def restart_protocol(self):
         """ Restart the episode protocol """
@@ -169,7 +146,7 @@ class MultiAgent:
         self.curr_reward = 0
         self.pub_start.publish(Int8(1))
 
-    def record(self, states, actions):
+    def record(self, states, actions, done=0, episode_end=0):
         """ Handle buffer updates and storage of replay """
         curr_global_state, reordering = self.generate_global_state(actions)
 
@@ -188,7 +165,7 @@ class MultiAgent:
                 prev_s, prev_a = self.prev_local_sample[i]
                 state_index = id_to_state_place[i]
                 if prev_a == prev_global_action[state_index]:
-                    self.policy_buffer.push(prev_s, prev_a, state_index, prev_global_state, prev_global_action)
+                    self.policy_buffer.push(prev_s, prev_a, states[i], actions[i], state_index, done, prev_global_state, prev_global_action, episode_end, i)
                 else:
                     print('### DANGER. Possible data recording bug in function "record" under multiagent_coordinator? ')
 
@@ -215,12 +192,13 @@ class MultiAgent:
             print('')
 
             # Train Policy
-            batches = self.policy_buffer.batch_all_memory(self.policy_batch)
+            rollouts = self.policy_buffer.batch_all_memory(shuffle=(not self.policy.q_learn))
             for i in range(self.policy_epochs):
                 sys.stdout.write("\r Policy Training Progress: %d%%" % (int(100 * (i + 1) / self.policy_epochs)))
                 sys.stdout.flush()
-                for b in batches:
-                    self.update_policy(b)
+                for r in rollouts:
+                    self.update_policy(r)
+            self.policy.update_explore()
             print('Entropy: ', self.entropy[-1])
             print('')
 
@@ -236,8 +214,8 @@ class MultiAgent:
 
     def update_policy(self, p_trans):
         average_entropy = self.policy.update_policy(p_trans.local_state, p_trans.local_action,
-                                                    p_trans.global_state, p_trans.global_action,
-                                                    p_trans.robot_id, self.reward_network)
+                                                    p_trans.next_state, p_trans.next_action, p_trans.global_state,
+                                                    p_trans.global_action, p_trans.robot_id, p_trans.done, self.reward_network)
         self.entropy.append(average_entropy)
 
     def reward_function(self, s, a, s_prime):
@@ -281,6 +259,15 @@ class MultiAgent:
 
     def finished(self, msg):
         """ Handle finishing all training """
+        save_data('/home/jimmy/Documents/Research/CLA/results/policy.pickle', self.policy)
+        save_data('/home/jimmy/Documents/Research/CLA/results/reward_net_loss.pickle', self.reward_network_loss)
+        save_data('/home/jimmy/Documents/Research/CLA/results/entropy.pickle', self.entropy)
+        save_data('/home/jimmy/Documents/Research/CLA/results/episode_rewards.pickle', self.episode_rewards)
+        save_data('/home/jimmy/Documents/Research/CLA/results/x_travel.pickle', self.x_travel)
+        save_data('/home/jimmy/Documents/Research/CLA/results/y_travel.pickle', self.y_travel)
+
+        torch.save(self.reward_network.state_dict(), '/home/jimmy/Documents/Research/CLA/results/reward_network.txt')
+
         plt.plot(range(len(self.reward_network_loss)), self.reward_network_loss)
         plt.title('Reward Network Loss over Training Steps')
         plt.show()
@@ -293,14 +280,6 @@ class MultiAgent:
         plt.title('Episode Accumulated Rewards')
         plt.show()
 
-        save_data('/home/jimmy/Documents/Research/CLA/results/policy.pickle', self.policy)
-        save_data('/home/jimmy/Documents/Research/CLA/results/reward_net_loss.pickle', self.reward_network_loss)
-        save_data('/home/jimmy/Documents/Research/CLA/results/entropy.pickle', self.entropy)
-        save_data('/home/jimmy/Documents/Research/CLA/results/episode_rewards.pickle', self.episode_rewards)
-        save_data('/home/jimmy/Documents/Research/CLA/results/x_travel.pickle', self.x_travel)
-        save_data('/home/jimmy/Documents/Research/CLA/results/y_travel.pickle', self.y_travel)
-
-        torch.save(self.reward_network.state_dict(), '/home/jimmy/Documents/Research/CLA/results/reward_network.txt')
         sys.exit(0)
 
     def generate_global_state(self, actions_dict):
@@ -329,11 +308,29 @@ class MultiAgent:
 if __name__ == '__main__':
     rospy.init_node('Dum', anonymous=True)
     num_agents = rospy.get_param('~num_bots')
-    params = {'policy_batch': 500, 'a': .1,  'b': 0,
+    params = {
+              # general parameters
+              'train_every': 1000, 'max_ep_len': 100, 'explore_steps': 2000,
+
+              # reward network
               'reward_width': 300, 'reward_depth': 3, 'reward_lr': 3e-4,
-              'reward_batch': 250, 'explore_steps': 2000,
-              'train_every': 1000, 'max_ep_len': 100, 'rotation_invariance': False,
-              'coma_infra': False, 'reward_net_offline': False, 'epochs': 75, 'noise_std': 0,
-              'policy_epochs': 1, 'boltzmann': 50, 'rim_size': .02,  # .05
-              'explore': 1, 'explore_decay': .8, 'min_explore': .05}
+              'reward_batch': 250, 'rotation_invariance': False, 'epochs': 75,
+              'noise_std': 0,
+
+              # General Policy parameters
+              'policy_epochs': 1, 'a': .1,   # a = lr for q learn
+
+              # cla-specific parameters
+              'b': 0, 'boltzmann': 50,
+
+              # diff-q policy gradient parameters
+              'q_learn': False, 'gamma': .8, 'td_lambda': .9,
+
+              # control parameters
+              # 'rim_size': .02,
+              'rim_size': .05,
+
+              # exploration
+              'explore': 1, 'explore_decay': .5, 'min_explore': .05,
+              }
     agent = MultiAgent(num_agents, params)

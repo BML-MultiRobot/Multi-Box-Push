@@ -2,41 +2,36 @@ from collections import namedtuple
 import numpy as np
 import pickle
 
-Transition = namedtuple('Transition', ('local_state', 'local_action', 'robot_id', 'global_state', 'global_action'))
+Transition = namedtuple('Transition', ('local_state', 'local_action', 'next_state', 'next_action', 'robot_id', 'done', 'global_state', 'global_action'))
 
 
 class PolicyMemory(object):
     def __init__(self, size=100000):
         self.memory = []
+        self.curr_rollout = self.curr_rollout = {i: [] for i in range(100)}
         self.size = size
 
-    def push(self, local_state, local_action, local_index, global_state, global_action):
+    def push(self, local_state, local_action, next_s, next_a, local_index, done, global_state, global_action, end, robot_id):
         """ Local_state: string indicator for local state
             Local_action: action index
             Local_index: the robot index associated to this sample
             Global_state: state inputted into neural network for global reward
             Global_action: joint action taken in this sample """
-        if len(self.memory) >= self.size:
+        if len(self) >= self.size:
             self.memory.pop(0)
-        self.memory.append(Transition(local_state, local_action, local_index, global_state, global_action))
+        self.curr_rollout[robot_id].append(Transition(local_state, local_action, next_s, next_a, local_index, done, global_state, global_action))
+        if end:
+            self.memory.append(self.curr_rollout[robot_id])
+            self.curr_rollout[robot_id] = []
 
-    def sample(self, max_num=256):
-        """ Get the samples from the entire replay. Not necessarily contiguous
-            (because retrieving samples from multiple agents). """
-        size = min(max_num, len(self.memory))
-        sample = self.memory[:size]
-        transitions = Transition(*zip(*sample))
-        self.memory = self.memory[:-size]
-        return transitions
-
-    def batch_all_memory(self, batch):
+    def batch_all_memory(self, shuffle=False):
         indices = np.arange(len(self.memory))
-        np.random.shuffle(indices)
-        total_segments = len(self.memory) // batch
+        if shuffle:
+            np.random.shuffle(indices)
         transition_list = []
-        for i in range(total_segments):
-            mem = map(self.memory.__getitem__, indices[i*batch: (i+1)*batch])
-            transition_list.append(Transition(*zip(*mem)))
+        for i in indices:
+            curr_rollout = self.memory[i]
+            transition_list.append(Transition(*zip(*curr_rollout)))
         return transition_list
 
     def load_data(self, path):
@@ -50,4 +45,4 @@ class PolicyMemory(object):
             self.memory = self.memory[:leave]
 
     def __len__(self):
-        return len(self.memory)
+        return sum([len(r) for r in self.memory]) + len(self.curr_rollout)

@@ -2,15 +2,14 @@ from collections import namedtuple
 import numpy as np
 import pickle
 
-Transition = namedtuple('Transition', ('global_state', 'global_action', 'reward', 'robot_id'))
+Transition = namedtuple('Transition', ('global_state', 'global_action', 'reward'))
 
 
 class RewardMemory(object):
-    def __init__(self, size=100000, coma_infra=False):
+    def __init__(self, size=100000):
         self.memory = []
         self.position = 0
         self.size = size
-        self.coma_infra = coma_infra
 
     def push(self, global_state, global_action, reward, num_agents):
         """ Global_state: state inputted into neural network for global reward
@@ -20,11 +19,7 @@ class RewardMemory(object):
         """
         if len(self.memory) >= self.size:
             self.memory.pop(0)
-        if self.coma_infra:
-            for i in range(num_agents):
-                self.memory.append(Transition(global_state, global_action, reward, i))
-        else:
-            self.memory.append(Transition(global_state, global_action, reward, 0))
+        self.memory.append(Transition(global_state, global_action, reward))
 
     def sample(self, batch=128):
         """ Randomly sample batch from replay """

@@ -15,8 +15,8 @@ def to_state_id(robot_id, locations, orientations, ball_location, near_ball):
     near_ball_indicator = int(distance(robot_location, ball_location) < near_ball)
     ball_location_indicator = determine_direction(robot_location, robot_ori, ball_location)
     ball_y_indicator = 0 if ball_location[1] > 0.05 else (1 if ball_location[1] < -.05 else 2)
-    # features = [ball_location_indicator, near_ball_indicator, ball_y_indicator]
-    features = [ball_location_indicator, ball_y_indicator]
+    features = [ball_location_indicator, near_ball_indicator, ball_y_indicator]
+    # features = [ball_location_indicator, ball_y_indicator]
     state_id = 0
     for i, f in enumerate(features):
         state_id += f * (10 ** i)
