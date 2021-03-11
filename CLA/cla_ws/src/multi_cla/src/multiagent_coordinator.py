@@ -310,7 +310,7 @@ if __name__ == '__main__':
     num_agents = rospy.get_param('~num_bots')
     params = {
               # general parameters
-              'train_every': 1000, 'max_ep_len': 100, 'explore_steps': 3000,
+              'train_every': 1000, 'max_ep_len': 100, 'explore_steps': 5000,
 
               # reward network
               'reward_width': 300, 'reward_depth': 3, 'reward_lr': 3e-4,
@@ -318,13 +318,13 @@ if __name__ == '__main__':
               'noise_std': 0,
 
               # General Policy parameters
-              'policy_epochs': 1, 'a': .1,   # a = lr for q learn
+              'policy_epochs': 1, 'a': 1,   # a = lr for q learn
 
               # cla-specific parameters
               'b': 0, 'boltzmann': 50,
 
               # diff-q policy gradient parameters
-              'q_learn': False, 'gamma': .8, 'td_lambda': .9,
+              'q_learn': True, 'gamma': .9, 'td_lambda': .9,
 
               # control parameters
               # 'rim_size': .02,

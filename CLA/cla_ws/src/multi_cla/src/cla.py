@@ -44,7 +44,8 @@ class CLA:
         if self.q_learn:
             self.update_q_values(rollouts, reward_net)
         for r in rollouts:
-            self.update_policy(r, reward_net)
+            entropy = self._update_policy(r, reward_net)
+        return entropy
 
     def update_q_values(self, rollouts, reward_net):
         # All inputs are in order of sampling meaning we can do Q-value estimates directly

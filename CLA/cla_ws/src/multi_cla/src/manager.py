@@ -78,7 +78,7 @@ class Manager():
         return
 
 
-episodes = 500
+episodes = 300
 
 
 if __name__ == "__main__":
