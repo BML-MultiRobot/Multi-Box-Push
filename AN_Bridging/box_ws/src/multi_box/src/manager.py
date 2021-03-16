@@ -7,11 +7,11 @@ import sys
 import vrep
 import time
 
-# VREP_SCENES = [('elevated_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_simulation.ttt'),
-#                 ('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt'),
-#                 ('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt') ]
+VREP_SCENES = [('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt') ]
+                # ('elevated_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_simulation.ttt'),
+                # ('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt'),]
 
-VREP_SCENES = [('stigmergic_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/stigmergic_simulation2.ttt')]
+# VREP_SCENES = [('stigmergic_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/stigmergic_simulation2.ttt')]
 
 
 class Manager:
@@ -82,5 +82,6 @@ class Manager:
 episodes = 1200
 
 if __name__ == "__main__":
-    manager = Manager()
     rospy.init_node('Dummy', anonymous=True)
+    manager = Manager()
+

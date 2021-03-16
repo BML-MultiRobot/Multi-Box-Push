@@ -2,11 +2,12 @@
 
 import numpy as np
 import torch
+from env_util import load_data
 
 
 class CLA:
     def __init__(self, state_indicators, num_actions, a, b, q_learn=False, gamma=.8, td_lambda=.95,
-                 explore=1, explore_decay=.8, min_explore=0):
+                 alpha=1.0, steps_per_train=10, explore=1, explore_decay=.8, min_explore=0, test_mode=False):
         # Learning rates
         self.b = b
         self.a = a
@@ -14,10 +15,13 @@ class CLA:
         states = self.recursive_state_add(state_indicators, 0)
         self.explore = explore
         self.explore_decay = explore_decay
+        self.test_mode = test_mode
         self.min_explore = min_explore
         self.q_learn = q_learn
         self.gamma = gamma
         self.td_lambda = td_lambda
+        self.alpha = alpha
+        self.steps_per_train = steps_per_train
         self.lr = a
 
         # Policy mapping strings to automata policy
@@ -43,8 +47,12 @@ class CLA:
     def update_policy(self, rollouts, reward_net):
         if self.q_learn:
             self.update_q_values(rollouts, reward_net)
-        for r in rollouts:
-            entropy = self._update_policy(r, reward_net)
+        if self.q_learn:
+            for _ in range(self.steps_per_train):
+                entropy = self._update_policy(rollouts[0], reward_net)
+        else:
+            for r in rollouts:
+                entropy = self._update_policy(r, reward_net)
         return entropy
 
     def update_q_values(self, rollouts, reward_net):
@@ -55,7 +63,8 @@ class CLA:
             num_samples = s.shape[0]
             p = np.array([self.softmax(state).detach().numpy() for state in s])
             advantages = reward_net.get_advantage(global_s, global_a, robot_ids, p, normalize=False)
-            q = self.q_value_estimate(next_s, next_a, advantages, 1 - done)
+            r = self.alpha * advantages  # + (1 - self.alpha) * rewards
+            q = self.q_value_estimate(next_s, next_a, r, 1 - done)
 
             for i in range(num_samples):
                 if (s[i], a[i]) in s_a:
@@ -91,7 +100,7 @@ class CLA:
             num_samples = s.shape[0]
             s_a = {(s[i], a[i]): [] for i in range(num_samples)}
             loss = torch.zeros(1)
-            for s_a_pair, q_target in s_a.items():
+            for s_a_pair, _ in s_a.items():
                 state, action = s_a_pair
                 adv = (self.q_values[state][action] - self.value_estimate(state)) / np.std(self.q_values[state])
                 loss += torch.log(self.softmax(state)[action]) * adv
@@ -150,7 +159,7 @@ class CLA:
 
     def get_action(self, s, probabilistic=True):
         automata = self.softmax(s).detach().numpy() if self.q_learn else self.policy[s].detach().numpy()
-        p = np.array([1.0/self.num_actions] * self.num_actions) if np.random.random() < self.explore else automata
+        p = np.array([1.0/self.num_actions] * self.num_actions) if np.random.random() < self.explore and not self.test_mode else automata
         action = np.random.choice(self.indices, p=p)
         return action
 
@@ -165,3 +174,6 @@ class CLA:
         for s in states:
             total_entropy += self.get_entropy(s)
         return total_entropy / len(states)
+
+    def load_policy(self, path):
+        self.policy = load_data(path)

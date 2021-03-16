@@ -111,3 +111,8 @@ def save_data(file_path, data):
     """ Save data to specific path """
     with open(file_path, 'wb') as handle:
         pickle.dump(data, handle)
+
+
+def load_data(file_path):
+    with open(file_path, 'rb') as handle:
+        return pickle.load(handle)

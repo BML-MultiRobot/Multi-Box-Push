@@ -16,7 +16,7 @@ algs = {
     0: 'SINGLE',
     1: 'STIGMERGIC'
 }
-ALGORITHM = 1
+ALGORITHM = 0
 description = algs[ALGORITHM]
 rospy.init_node('Dummy', anonymous=True)
 

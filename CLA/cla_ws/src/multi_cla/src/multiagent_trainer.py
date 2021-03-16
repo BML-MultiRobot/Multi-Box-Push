@@ -11,9 +11,12 @@ import torch
 
 from buffers.policy_buffer import PolicyMemory
 from buffers.reward_buffer import RewardMemory
+from buffers.model_buffer import ModelMemory
 from cla import CLA
 from reward_network import RewardNetwork
+from model import Model
 from env_util import to_state_id, save_data
+import pickle
 
 
 Agent = namedtuple('Agent', ['x', 'y', 'ori', 'id'])
@@ -56,11 +59,12 @@ class MultiAgent:
         """ Buffer Replays """
         self.reward_buffer = RewardMemory(size=1e6)
         self.policy_buffer = PolicyMemory()
+        self.model_buffer = ModelMemory()
 
         """ Policy CLA Parameters"""
         state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1], [0, 1, 2], [0, 1], [0, 1]]
         self.policy = CLA(state_indicators, self.u_n, params['a'], params['b'], params['q_learn'], params['gamma'], params['td_lambda'],
-                          params['explore'], params['explore_decay'], params['min_explore'])
+                          params['alpha'], params['steps_per_train'], params['explore'], params['explore_decay'], params['min_explore'], params['test_mode'])
         self.policy_epochs = params['policy_epochs']
         self.rim_size = params['rim_size']
         self.near_ball = .225
@@ -74,10 +78,19 @@ class MultiAgent:
         self.train_now = params['explore_steps']
         self.epochs = params['epochs']
 
+        """ Model Network Parameters """
+        model_neurons = [3*self.num_agents + 1] + [params['reward_width']] * params['reward_depth'] + [2*self.num_agents + 1]
+        self.model = Model(model_neurons, params['reward_lr'], self.u_n, self.num_agents, params['noise_std'])
+
         """ Trackers for data """
-        self.reward_network_loss, self.entropy, self.episode_rewards, self.x_travel, self.y_travel = [], [], [], [], []
+        self.reward_network_loss, self.model_network_loss, self.entropy, self.episode_rewards, self.x_travel, self.y_travel = [], [], [], [], [], []
         self.entropy.append(self.policy.average_entropy())
         self.curr_reward = 0
+
+        """ Testing """
+        self.test_mode = params['test_mode']
+        if self.test_mode:
+            self.policy.load_policy('/home/jimmy/Documents/Research/CLA/results/03_11_2021/policy.pickle')
 
         rospy.sleep(3)
         self.pub_start.publish(Int8(1))
@@ -158,6 +171,9 @@ class MultiAgent:
             self.reward_buffer.push(prev_global_state, prev_global_action, r, self.num_agents)
             self.curr_reward += r
 
+            # Model Buffer
+            self.model_buffer.push(prev_global_state, prev_global_action, curr_global_state.state)
+
             # Policy Buffer
             for i in self.prev_local_sample.keys():
                 prev_s, prev_a = self.prev_local_sample[i]
@@ -177,14 +193,17 @@ class MultiAgent:
     def train(self, override=False):
         """ Handles training the CLA agent """
         # Update the reward network
-        if override or (len(self.reward_buffer) >= self.train_now):
+        if (override or (len(self.reward_buffer) >= self.train_now)) and not self.test_mode:
             # Train Reward
             print(' ######### TRAINING #########')
             batches = self.reward_buffer.batch_all_memory(self.reward_batch)
+            model_batches = self.model_buffer.batch_all_memory(self.reward_batch)
             for i in range(self.epochs):
-                sys.stdout.write("\r Reward Training Progress: %d%%" % (int(100*(i+1)/self.epochs)))
+                sys.stdout.write("\r Reward & Model Training Progress: %d%%" % (int(100*(i+1)/self.epochs)))
                 sys.stdout.flush()
                 epoch_loss = self.reward_network.train_multiple_transitions(batches)
+                model_loss = self.model.train_multiple_transitions(model_batches)
+                self.model_network_loss.append(model_loss)
                 self.reward_network_loss.append(epoch_loss)
             print('Reward Average Losses: ', self.reward_network_loss[-1])
             print('')
@@ -310,7 +329,7 @@ if __name__ == '__main__':
     num_agents = rospy.get_param('~num_bots')
     params = {
               # general parameters
-              'train_every': 1000, 'max_ep_len': 100, 'explore_steps': 5000,
+              'train_every': 2000, 'max_ep_len': 100, 'explore_steps': 2000, 'test_mode': False,
 
               # reward network
               'reward_width': 300, 'reward_depth': 3, 'reward_lr': 3e-4,
@@ -318,13 +337,13 @@ if __name__ == '__main__':
               'noise_std': 0,
 
               # General Policy parameters
-              'policy_epochs': 1, 'a': 1,   # a = lr for q learn
+              'policy_epochs': 1, 'a': .2,   # a = lr for q learn
 
               # cla-specific parameters
               'b': 0, 'boltzmann': 50,
 
               # diff-q policy gradient parameters
-              'q_learn': True, 'gamma': .9, 'td_lambda': .9,
+              'q_learn': True, 'gamma': .95, 'td_lambda': .75, 'alpha': 1,  'steps_per_train': 10, # proportion for reward attribution vs intrinsic
 
               # control parameters
               # 'rim_size': .02,
