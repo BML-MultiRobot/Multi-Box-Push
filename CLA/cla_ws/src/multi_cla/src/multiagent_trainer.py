@@ -179,12 +179,13 @@ class MultiAgent:
                 prev_s, prev_a = self.prev_local_sample[i]
                 state_index = id_to_state_place[i]
                 if prev_a == prev_global_action[state_index]:
-                    self.policy_buffer.push(prev_s, prev_a, states[i], actions[i], state_index, done, prev_global_state, prev_global_action, episode_end, i)
+                    self.policy_buffer.push(prev_s, prev_a, states[i], actions[i], state_index, done, prev_global_state,
+                                            prev_global_action, curr_global_state.state, curr_global_state.action, episode_end, i)
                 else:
                     print('### DANGER. Possible data recording bug in function "record" under multiagent_coordinator? ')
 
         # Reset prev
-        self.prev_local_sample = {i: Sample(states[i], actions[i])for i in range(self.num_agents)}
+        self.prev_local_sample = {i: Sample(states[i], actions[i]) for i in range(self.num_agents)}
         self.prev_global_sample = curr_global_state
         self.prev_reordering = reordering
         self.prev_ball = self.ball_location
@@ -205,7 +206,7 @@ class MultiAgent:
                 model_loss = self.model.train_multiple_transitions(model_batches)
                 self.model_network_loss.append(model_loss)
                 self.reward_network_loss.append(epoch_loss)
-            print('Reward Average Losses: ', self.reward_network_loss[-1])
+            print('Reward Average Losses: ', self.reward_network_loss[-1], 'Model Average Losses: ', self.model_network_loss[-1])
             print('')
 
             # Train Policy
@@ -230,7 +231,7 @@ class MultiAgent:
         self.reward_network_loss.append(reward_network_loss)
 
     def update_policy(self, rollouts):
-        average_entropy = self.policy.update_policy(rollouts, self.reward_network)
+        average_entropy = self.policy.update_policy(rollouts, self.reward_network, self.model)
         self.entropy.append(average_entropy)
 
     def reward_function(self, s, a, s_prime):
@@ -284,11 +285,17 @@ class MultiAgent:
         save_data('/home/jimmy/Documents/Research/CLA/results/episode_rewards.pickle', self.episode_rewards)
         save_data('/home/jimmy/Documents/Research/CLA/results/x_travel.pickle', self.x_travel)
         save_data('/home/jimmy/Documents/Research/CLA/results/y_travel.pickle', self.y_travel)
+        save_data('/home/jimmy/Documents/Research/CLA/results/model_net_loss.pickle', self.model_network_loss)
 
         torch.save(self.reward_network.state_dict(), '/home/jimmy/Documents/Research/CLA/results/reward_network.txt')
+        torch.save(self.model.state_dict(), '/home/jimmy/Documents/Research/CLA/results/model.txt')
 
         plt.plot(range(len(self.reward_network_loss)), self.reward_network_loss)
         plt.title('Reward Network Loss over Training Steps')
+        plt.show()
+
+        plt.plot(range(len(self.model_network_loss)), self.model_network_loss)
+        plt.title('Model Network Loss over Training Steps')
         plt.show()
 
         plt.plot(range(len(self.entropy)), self.entropy)
@@ -329,7 +336,7 @@ if __name__ == '__main__':
     num_agents = rospy.get_param('~num_bots')
     params = {
               # general parameters
-              'train_every': 2000, 'max_ep_len': 100, 'explore_steps': 2000, 'test_mode': False,
+              'train_every': 100, 'max_ep_len': 100, 'explore_steps': 100, 'test_mode': False,
 
               # reward network
               'reward_width': 300, 'reward_depth': 3, 'reward_lr': 3e-4,
@@ -343,7 +350,8 @@ if __name__ == '__main__':
               'b': 0, 'boltzmann': 50,
 
               # diff-q policy gradient parameters
-              'q_learn': True, 'gamma': .95, 'td_lambda': .75, 'alpha': 1,  'steps_per_train': 10, # proportion for reward attribution vs intrinsic
+              'q_learn': True, 'gamma': .99, 'td_lambda': .75, 'alpha': 1, # proportion for reward attribution vs intrinsic
+              'steps_per_train': 1,
 
               # control parameters
               # 'rim_size': .02,

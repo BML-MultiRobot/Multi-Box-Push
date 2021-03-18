@@ -44,17 +44,19 @@ class Model(nn.Module):
             Output: rewards for each of the actions robot_id can take given current state and other robot actions """
         output = None
         a = a.copy()
+        curr_s = torch.from_numpy(s) if isinstance(s, np.ndarray) else s
         for i in range(self.num_actions):
             a[range(a.shape[0]), robot_ids] = i
-            curr_s, curr_a = torch.from_numpy(s), torch.from_numpy(a)
+            curr_a = torch.from_numpy(a) if isinstance(a, np.ndarray) else a
             curr_a = (curr_a - (self.num_actions / 2.0)) / (self.num_actions / 2.0)
-            x = torch.cat((curr_s.float(), curr_a.float()), dim=1)
-            curr_out = self.forward(x)
+            x = torch.cat((curr_s.float(), curr_a.float()), dim=1)  # n x (s + u)
+            curr_out = self.forward(x)  # n x s
+            curr_out = curr_out.unsqueeze(1)  # n x 1 x s
             if i == 0:
                 output = curr_out
             else:
-                output = torch.cat((output, curr_out), dim=2)
-        return output
+                output = torch.cat((output, curr_out), dim=1)
+        return output  # n x u x s
 
     def forward(self, x):
         for i in range(self.n_layers):
@@ -73,6 +75,7 @@ class Model(nn.Module):
         if self.noise_std > 0:
             s = s + np.random.normal(0, self.noise_std, s.shape)
         curr_a = (a - (self.num_actions / 2.0)) / (self.num_actions / 2.0)
+        s, curr_a = torch.from_numpy(s), torch.from_numpy(curr_a)
         x = torch.cat((s.float(), curr_a.float()), dim=1)
         values = self.forward(x)
 

@@ -2,7 +2,8 @@ from collections import namedtuple
 import numpy as np
 import pickle
 
-Transition = namedtuple('Transition', ('local_state', 'local_action', 'next_state', 'next_action', 'robot_id', 'done', 'global_state', 'global_action'))
+Transition = namedtuple('Transition', ('local_state', 'local_action', 'next_state', 'next_action', 'robot_id', 'done',
+                                       'global_state', 'global_action', 'next_global_state', 'next_global_action'))
 
 
 class PolicyMemory(object):
@@ -11,7 +12,8 @@ class PolicyMemory(object):
         self.curr_rollout = self.curr_rollout = {i: [] for i in range(100)}
         self.size = size
 
-    def push(self, local_state, local_action, next_s, next_a, local_index, done, global_state, global_action, end, robot_id):
+    def push(self, local_state, local_action, next_s, next_a, local_index, done,
+             global_state, global_action, next_global_state, next_global_action, end, robot_id):
         """ Local_state: string indicator for local state
             Local_action: action index
             Local_index: the robot index associated to this sample
@@ -19,7 +21,8 @@ class PolicyMemory(object):
             Global_action: joint action taken in this sample """
         if len(self) >= self.size:
             self.memory.pop(0)
-        self.curr_rollout[robot_id].append(Transition(local_state, local_action, next_s, next_a, local_index, done, global_state, global_action))
+        self.curr_rollout[robot_id].append(Transition(local_state, local_action, next_s, next_a, local_index, done,
+                                                      global_state, global_action, next_global_state, next_global_action))
         if end:
             self.memory.append(self.curr_rollout[robot_id])
             self.curr_rollout[robot_id] = []

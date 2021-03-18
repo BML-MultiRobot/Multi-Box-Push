@@ -43,20 +43,23 @@ class RewardNetwork(nn.Module):
 
             Input to the neural network: all the states, filter action without index robot_id, robot_id
             Output: rewards for each of the actions robot_id can take given current state and other robot actions """
-        num_bots = a.shape[1]
-
         output = None
         a = a.copy()
+
+        curr_s = torch.from_numpy(s) if isinstance(s, np.ndarray) else s
+        mask = np.zeros((a.shape[0], a.shape[-1]))
+        mask[range(mask.shape[0]), robot_ids] = 1
+        mask = np.repeat(np.expand_dims(mask, axis=1), repeats=a.shape[1], axis=1) if mask.shape != a.shape else mask
         for i in range(self.num_actions):
-            a[range(a.shape[0]), robot_ids] = i
-            curr_s, curr_a = torch.from_numpy(s), torch.from_numpy(a)
+            a[mask > .5] = i
+            curr_a = torch.from_numpy(a) if isinstance(a, np.ndarray) else a
             curr_a = (curr_a - (self.num_actions / 2.0)) / (self.num_actions / 2.0)
-            x = torch.cat((curr_s.float(), curr_a.float()), dim=1)
+            x = torch.cat((curr_s.float(), curr_a.float()), dim=curr_s.dim()-1)
             curr_out = self.forward(x)
             if i == 0:
                 output = curr_out
             else:
-                output = torch.cat((output, curr_out), dim=1)
+                output = torch.cat((output, curr_out), dim=curr_s.dim()-1)
         return output
 
     def forward(self, x):
@@ -76,7 +79,7 @@ class RewardNetwork(nn.Module):
         x = torch.cat((s.float(), a.float()), dim=1)
         return self.forward(x)
 
-    def get_advantage(self, s, a, robot_ids, p, normalize=False):
+    def get_advantage(self, s, a, next_s, next_a, robot_ids, p, normalize=False, model=None):
         """ s: n x d array of global states
             a: n x r array of global action indices
             robot_ids: n x 1 array of the agent id in question
@@ -87,7 +90,19 @@ class RewardNetwork(nn.Module):
         output = self.forward_from_numpy_all_actions(s, a, robot_ids)
         expected_value = torch.sum(output * p, dim=1).unsqueeze(1)
 
-        advantages = output - expected_value
+        if model:
+            next_states = model.forward_from_numpy_all_actions(s, a, robot_ids)  # n x u x s
+            next_a_repeat = np.expand_dims(next_a, axis=1)  # n x r -> n x 1 x r
+            next_a_repeat = np.repeat(next_a_repeat, repeats=self.num_actions, axis=1)  # n x 1 x r -> n x u x r
+            next_r_distribution = self.forward_from_numpy_all_actions(next_states, next_a_repeat, robot_ids)  # n x u x u
+            next_max_r = torch.max(next_r_distribution, dim=2)[0] # n x u
+
+            curr_max_r = torch.max(output, dim=1)[0].unsqueeze(1) # n x 1
+            delta_r = next_max_r - curr_max_r  # n x u
+            advantages = (output - expected_value) + (delta_r - torch.mean(delta_r, dim=1).unsqueeze(1))
+
+        else:
+            advantages = output - expected_value
         if any(torch.isnan(advantages).flatten()):
             print('NAN DETECTED IN GET_ADVANTAGE: ', output, '#### EXPECTED VALUE ####', expected_value, '### P ###', p)
 

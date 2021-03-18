@@ -44,25 +44,26 @@ class CLA:
             result.append(curr)
         return np.array(result).flatten()
 
-    def update_policy(self, rollouts, reward_net):
+    def update_policy(self, rollouts, reward_net, model):
         if self.q_learn:
-            self.update_q_values(rollouts, reward_net)
+            self.update_q_values(rollouts, reward_net, model)
         if self.q_learn:
             for _ in range(self.steps_per_train):
-                entropy = self._update_policy(rollouts[0], reward_net)
+                for r in rollouts:
+                    entropy = self._update_policy(r, reward_net)
         else:
             for r in rollouts:
                 entropy = self._update_policy(r, reward_net)
         return entropy
 
-    def update_q_values(self, rollouts, reward_net):
+    def update_q_values(self, rollouts, reward_net, model):
         # All inputs are in order of sampling meaning we can do Q-value estimates directly
         s_a = {}
         for r in rollouts:
-            s, a, next_s, next_a, global_s, global_a, robot_ids, done = CLA.unpack(r)
+            s, a, next_s, next_a, global_s, global_a, next_global_s, next_global_a, robot_ids, done = CLA.unpack(r)
             num_samples = s.shape[0]
             p = np.array([self.softmax(state).detach().numpy() for state in s])
-            advantages = reward_net.get_advantage(global_s, global_a, robot_ids, p, normalize=False)
+            advantages = reward_net.get_advantage(global_s, global_a, next_global_s, next_global_a, robot_ids, p, normalize=False, model=model)
             r = self.alpha * advantages  # + (1 - self.alpha) * rewards
             q = self.q_value_estimate(next_s, next_a, r, 1 - done)
 
@@ -84,9 +85,11 @@ class CLA:
         next_a = np.array(p_trans.next_action)
         global_s = np.array(p_trans.global_state)
         global_a = np.array(p_trans.global_action)
+        next_global_s = np.array(p_trans.next_global_state)
+        next_global_a = np.array(p_trans.next_global_action)
         robot_ids = np.array(p_trans.robot_id)
         done = np.array(p_trans.done)
-        return s, a, next_s, next_a, global_s, global_a, robot_ids, done
+        return s, a, next_s, next_a, global_s, global_a, next_global_s, next_global_a, robot_ids, done
 
     def _update_policy(self, p_trans, reward_net):
         """ s: integer input encoding state
@@ -94,7 +97,7 @@ class CLA:
 
             On-policy updates based on single rollout/trajectory
         """
-        s, a, next_s, next_a, global_s, global_a, robot_ids, done = CLA.unpack(p_trans)
+        s, a, next_s, next_a, global_s, global_a, _, _, robot_ids, done = CLA.unpack(p_trans)
 
         if self.q_learn:
             num_samples = s.shape[0]
@@ -116,7 +119,6 @@ class CLA:
                             automata = automata - torch.max(automata) + 25
                     automata.requires_grad = True
                     self.policy[s] = automata
-
         else:
             p = np.array([self.policy[state].detach().numpy() for state in s])
             beta = reward_net.get_advantage(global_s, global_a, robot_ids, p, normalize=True)
