@@ -7,7 +7,7 @@ from env_util import load_data
 
 class CLA:
     def __init__(self, state_indicators, num_actions, a, b, q_learn=False, gamma=.8, td_lambda=.95,
-                 alpha=1.0, steps_per_train=10, explore=1, explore_decay=.8, min_explore=0, test_mode=False):
+                 alpha=1.0, steps_per_train=10, q_lr=.2, explore=1, explore_decay=.8, min_explore=0, test_mode=False):
         # Learning rates
         self.b = b
         self.a = a
@@ -22,6 +22,7 @@ class CLA:
         self.td_lambda = td_lambda
         self.alpha = alpha
         self.steps_per_train = steps_per_train
+        self.q_lr = q_lr
         self.lr = a
 
         # Policy mapping strings to automata policy
@@ -75,7 +76,7 @@ class CLA:
 
         for s_a_pair, q_target in s_a.items():
             state, action = s_a_pair
-            self.q_values[state][action] = np.mean(q_target)
+            self.q_values[state][action] = (self.q_values[state][action] * (1 - self.q_lr)) + self.q_lr * np.mean(q_target)
 
     @staticmethod
     def unpack(p_trans):
@@ -106,7 +107,7 @@ class CLA:
             for s_a_pair, _ in s_a.items():
                 state, action = s_a_pair
                 adv = (self.q_values[state][action] - self.value_estimate(state)) / np.std(self.q_values[state])
-                loss += torch.log(self.softmax(state)[action]) * adv
+                loss += torch.log(self.softmax(state)[action]) * adv.detach()
             loss = loss / len(s_a)
             assert not any(torch.isnan(loss))
             loss.backward()

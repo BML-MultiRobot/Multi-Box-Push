@@ -64,7 +64,7 @@ class MultiAgent:
         """ Policy CLA Parameters"""
         state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1], [0, 1, 2], [0, 1], [0, 1]]
         self.policy = CLA(state_indicators, self.u_n, params['a'], params['b'], params['q_learn'], params['gamma'], params['td_lambda'],
-                          params['alpha'], params['steps_per_train'], params['explore'], params['explore_decay'], params['min_explore'], params['test_mode'])
+                          params['alpha'], params['steps_per_train'], params['q_lr'], params['explore'], params['explore_decay'], params['min_explore'], params['test_mode'])
         self.policy_epochs = params['policy_epochs']
         self.rim_size = params['rim_size']
         self.near_ball = .225
@@ -94,7 +94,7 @@ class MultiAgent:
 
         rospy.sleep(3)
         self.pub_start.publish(Int8(1))
-        self.test = {0: 0, 1: 0}
+        self.time = rospy.get_time()
         rospy.spin()
         return
 
@@ -117,9 +117,11 @@ class MultiAgent:
         if not any(self.steps <= self.period):
             sys.exit(0) # make sure each time step is accounted for
         if all(self.steps >= self.period):
+            self.time = rospy.get_time()
             states, targets, actions = self.action_step()
             failed = self.failed()
-            if self.total_steps > self.episode_length or failed:
+            if self.total_steps >= self.episode_length or failed:
+                print('Time per iteration: ', rospy.get_time() - self.time)
                 self.record(states, actions, done=int(failed), episode_end=int(True))
                 self.restart_protocol()
             else:
@@ -336,21 +338,21 @@ if __name__ == '__main__':
     num_agents = rospy.get_param('~num_bots')
     params = {
               # general parameters
-              'train_every': 100, 'max_ep_len': 100, 'explore_steps': 100, 'test_mode': False,
+              'train_every': 2000, 'max_ep_len': 50, 'explore_steps': 2000, 'test_mode': False,
 
               # reward network
               'reward_width': 300, 'reward_depth': 3, 'reward_lr': 3e-4,
-              'reward_batch': 250, 'rotation_invariance': True, 'epochs': 75,
+              'reward_batch': 250, 'rotation_invariance': False, 'epochs': 75,
               'noise_std': 0,
 
               # General Policy parameters
-              'policy_epochs': 1, 'a': .2,   # a = lr for q learn
+              'policy_epochs': 1, 'a': .25,   # a = lr for q learn policy gradient
 
               # cla-specific parameters
               'b': 0, 'boltzmann': 50,
 
               # diff-q policy gradient parameters
-              'q_learn': True, 'gamma': .99, 'td_lambda': .75, 'alpha': 1, # proportion for reward attribution vs intrinsic
+              'q_learn': True, 'q_lr': .1, 'gamma': .99, 'td_lambda': .25, 'alpha': 1, # proportion for reward attribution vs intrinsic
               'steps_per_train': 1,
 
               # control parameters

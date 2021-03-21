@@ -88,7 +88,7 @@ class RewardNetwork(nn.Module):
             Output: beta values for each action (0 to 1), 1 being most favorable """
         p = torch.from_numpy(p)
         output = self.forward_from_numpy_all_actions(s, a, robot_ids)
-        expected_value = torch.sum(output * p, dim=1).unsqueeze(1)
+        expected_value = torch.mean(output, dim=1).unsqueeze(1)# torch.sum(output * p, dim=1).unsqueeze(1)
 
         if model:
             next_states = model.forward_from_numpy_all_actions(s, a, robot_ids)  # n x u x s
@@ -99,7 +99,12 @@ class RewardNetwork(nn.Module):
 
             curr_max_r = torch.max(output, dim=1)[0].unsqueeze(1) # n x 1
             delta_r = next_max_r - curr_max_r  # n x u
-            advantages = (output - expected_value) + (delta_r - torch.mean(delta_r, dim=1).unsqueeze(1))
+
+            contribution_r = output - expected_value
+            distribution_r = delta_r - torch.mean(delta_r, dim=1).unsqueeze(1)
+            print('min, max distribution: ', torch.min(distribution_r), torch.max(distribution_r),
+                  'min, max contribution: ', torch.min(contribution_r), torch.max(contribution_r))
+            advantages = contribution_r + distribution_r
 
         else:
             advantages = output - expected_value

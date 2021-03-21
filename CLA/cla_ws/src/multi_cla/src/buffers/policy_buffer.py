@@ -48,4 +48,4 @@ class PolicyMemory(object):
             self.memory = self.memory[:leave]
 
     def __len__(self):
-        return sum([len(r) for r in self.memory]) + len(self.curr_rollout)
+        return sum([len(r) for r in self.memory]) + sum(len(s) for _, s in self.curr_rollout.items())
