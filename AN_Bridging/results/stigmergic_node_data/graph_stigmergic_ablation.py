@@ -1,9 +1,10 @@
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import os
 
-directory = 'env_4'
+directory = 'vrep_env1_in_nx'  # CHANGE ME
 file_names = os.listdir(directory)
 
 def get_moving_average(lst, resolution):
@@ -41,25 +42,25 @@ def plot_average_moving_average(resolution):
             date = '_'.join(file.split('_')[:7])
             curr.append(date)
             parameters_to_dates[parameters] = curr
-    with open(directory + '/all_parameters_info.txt', "wb") as fp:  # Pickling
-        for name, parameters in all_parameters.items():
-            fp.write(name + ': ')
-            for p in sorted(parameters):
-                fp.write(str(p) + ', ')
-            fp.write('\n')
-        fp.write('\n')
+    # with open(directory + '/all_parameters_info.txt', "wb") as fp:  # Pickling
+    #     for name, parameters in all_parameters.items():
+    #         fp.write(name + ': ')
+    #         for p in sorted(parameters):
+    #             fp.write(str(p) + ', ')
+    #         fp.write('\n')
+    #     fp.write('\n')
 
     metric = 'steps'# 'indicator_success_episode' #
-    ablation = 'Explore Decay'
+    ablation = 'Box Preference Decay'  # CHANGE ME
     env = 'env_1' if metric == 'indicator_success_episode' else ''
     parameters_graph = {
-        'Box Preference Decay': [.8],
+        'Box Preference Decay': [.95],
         'Detection Radius': [3],
-        'Distance Boltzmann': [1],
+        'Distance Boltzmann': [.5],
         'Explore Decay': [.95],
-        'Initial Explore': [.5],
+        'Initial Explore': [1],
     }
-    parameters_graph[ablation] = all_parameters[ablation]
+    parameters_graph[ablation] = sorted(all_parameters[ablation])
     ablation_index = sorted(parameters_graph.keys()).index(ablation)
     for d in parameters_graph['Box Preference Decay']:
         for e in parameters_graph['Detection Radius']:
@@ -81,9 +82,16 @@ def plot_average_moving_average(resolution):
                         average = np.mean(np.array(runs), axis=0).flatten()
                         average = np.array(get_moving_average(average, resolution))
                         label = p[ablation_index]
-                        plt.plot(range(average.shape[0]), average, label=label)
-    plt.title('Ablation on ' + ablation + ' in terms of ' + metric)
+                        plt.plot(range(average.shape[0]), average, label=r'$B_{decay}$ = ' + str(label))  # CHANGE ME
+    plt.xlabel('Episode')
+    plt.ylabel('Steps Until Success')
+    plt.title('Performance Varying ' + 'Box Decay' + r' $B_{decay}$')  # CHANGE ME
     plt.legend()
+    
+    plt.locator_params(axis='y', nbins=10)
+    plt.locator_params(axis='x', nbins=8)
+
+    plt.savefig('ablation ' + ablation)
     plt.show()
 
 

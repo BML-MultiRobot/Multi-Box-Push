@@ -78,7 +78,7 @@ class StigmergicGraphVREP(StigmergicGraph):
                 agent_new_location = path[0]
                 agent.current_node = box_node  # TODO: This is a CHANGE. Might be buggy.
                 self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)] *= aa_graphMap_node_simulation.B_preference_decay
-                print(agent.robot_id, 'DECAYED: New placement preference: ', self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)])
+                print(agent.robot_id, 'DECAYED: New placement preference: ', self.boxes[box_index].placement_preferences[self.nodes.index(agent.target_node)], self.nodes.index(agent.target_node))
             else:
                 """ Option 4: """
                 path = self.get_path_to_hole(curr_node, box_node, from_box_to_hole=False)[1:2]
@@ -112,15 +112,17 @@ class StigmergicGraphVREP(StigmergicGraph):
                 box = box_node.remove_box()
                 new_node.place_box(box)
                 assert not self.box_has_been_moved(box)
-                self.update_neighbors_to_reflect_box_change(curr_node)
-                self.update_neighbors_to_reflect_box_change(box_node)
-                self.update_neighbors_to_reflect_box_change(new_node)
                 box_prev_node = box.current_node
-                box.current_node = new_node
                 if len(self.bot_to_current_path[robot_id]) == 0:
                     self.placed_box_indices.add(box_index)
                     self.handle_reaching_goal(robot_id)
                     new_node = box_prev_node
+
+                self.update_neighbors_to_reflect_box_change(curr_node)
+                self.update_neighbors_to_reflect_box_change(box_node)
+                self.update_neighbors_to_reflect_box_change(new_node)
+                box.current_node = new_node
+
 
         """ Handle adding pheromones"""
         path = [curr_node, new_node]

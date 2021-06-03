@@ -81,13 +81,16 @@ class Graph_Map_Manager(object):
         self.visualizer.update_display_graph_using_current_environment(self.display_graph, self.episode)
         plt.ion()
         plt.show()
+        # time.sleep(5)
+        # self.visualizer.update_display_graph_using_current_environment(self.display_graph, self.episode)
+        # time.sleep(12345)
         self.map_finished.publish(Int16(1))
 
         """ For keeping track of episode termination """
         self.restart_publisher = rospy.Publisher("/restart", Int8, queue_size=1)
         self.robot_steps = [0 for i in range(self.num_agents)]
         self.curr_episode = 1
-        self.max_steps = 50 # 50
+        self.max_steps = 80  # 50
         self.max_episodes = 20
         self.max_time_in_seconds = 1600 # 1600 # just in case the policy doesn't do very well or something goes wrong...
         self.total_steps = []
@@ -114,6 +117,7 @@ class Graph_Map_Manager(object):
                     self.restart_publisher.publish(Int8(1))
                     self.receive_time_is_up(1)
                     self.curr_episode += 1
+                    # stores number steps last agent to reach goal ~= max number of steps across all agents at convergence
                     self.total_steps.append(min(steps, self.max_steps) if curr_time <= self.max_time_in_seconds else self.max_steps)
                     self.success.append(float(sum(reached_goal)) / self.num_agents)
                     start = time.time()

@@ -12,24 +12,29 @@ import datetime
 PHEROMONE_ID_STAGGER = 100  # just for distinguishing pheromones
 INITIAL_BOX_DISTANCE_SET = .1  # just for presetting node distances (set low to encourage initial exploration)
 RADIUS = 2  # 1.9 for node simulation. 2 for V-REP environment. radius for node creation (not actually for algorithm)
-SPEED = .1  # time in seconds per step for visualization
-MAX_DISTANCE_SET = 60  # 40 for V-REP # 20 for large # 10 for medium # 6 for small environments
-env_name = 'vrep_env_node_version_2'
-grid_search = False
+SPEED = .05  # time in seconds per step for visualization
+MAX_DISTANCE_SET = 40  # 40 for V-REP # 20 for large # 10 for medium # 6 for small environments
+env_name = 'vre_env_hard'
+grid_search = True
+account_for_controls = True
+
+# Taking Pictures and Graphs
+take_pictures_of_environment = False
+show_all_neighbors = True
 
 
 # Training hyper-parameters
-EPISODES = 50
-MAX_STEPS = 50
+EPISODES = 20
+MAX_STEPS = 80 # 50
 
 # Performance hyper-parameters
-DETECTION_RADIUS = 5  # 3 for simulation...10 for V-REP
-EXPLORE_DECAY = .25 # .95
-START_EXPLORE = .5
+DETECTION_RADIUS = 20  # 5 # 3 for simulation...10 for V-REP
+EXPLORE_DECAY = .5  # .95
+START_EXPLORE = 0
 MIN_EXPLORE = 0
 
 
-B_preference_decay = .95  # Decays every time we attempt to place a box
+B_preference_decay = .95 # .7  # Decays every time we attempt to place a box
 Boltzmann = 1  # How certain we are in using D_pheromone to decide next node
                  # (make approx equal to inverse avg distance between nodes) V-REP nodes tend to be 2x farther apart than node simulation ones
 
@@ -45,11 +50,11 @@ def stigmergic_main(nodes, inclusions, exclusions, box_data, robot_data, goal_in
     trainer = Trainer(nodes, inclusions, exclusions, box_data, robot_data, goal_index)
     if grid_search:
         num_trials = 5
-        detection_radius = [3]#[3, 5, 8, 10] #
-        explore_decay = [.95] #[.25, .5, .75, .95]#
-        initial_explore = [1]#[.2, .5, .8, 1] #
-        box_preference_decay = [.95]#[.2, .5, .9, .95] #
-        boltzmann =  [.25, .5, 1] #[.5, 1, 2][.5] #
+        detection_radius = [20]# [5, 10, 15, 20]# [3]#[3, 5, 8, 10] #
+        explore_decay = [.75] #[.25, .5, .75, .95]#
+        initial_explore = [.5]#[.2, .5, .8, 1] #
+        box_preference_decay = [.75]#[.2, .5, .9, .95] #
+        boltzmann = [1] # [.25, 5, 1] #[.5, 1, 2][.5] #
     else:
         num_trials = 1
         detection_radius = [DETECTION_RADIUS]
@@ -83,6 +88,7 @@ class Trainer(object):
         self.start_state.convert_to_nodes(nodes, inclusions, exclusions, box_data, robot_data, goal_index) if goal_index else None
         self.current_environment = None
         self.goal_index = goal_index
+        self.tracker = []
 
     def main_algorithm(self):
         self.current_environment = deepcopy(self.start_state)
@@ -92,6 +98,11 @@ class Trainer(object):
         self.update_display_graph_using_current_environment(display_graph, 1)
         plt.ion()
         plt.show()
+        import time
+        time.sleep(5)
+        self.update_display_graph_using_current_environment(display_graph, 1)
+        if take_pictures_of_environment:
+            time.sleep(100000)
         for i in range(EPISODES):
             print('')
             print(' ##### EPISODE: ', i + 1)
@@ -109,7 +120,7 @@ class Trainer(object):
                 achieved_goal, restart = self.current_environment.one_step()
                 step += 1
             print('Achieved goal: ', achieved_goal)
-
+            b = self.current_environment.boxes[1]
             self.update_display_graph_using_current_environment(display_graph, i + 1)
             plt.pause(SPEED)
 
@@ -149,39 +160,47 @@ class Trainer(object):
         networkx_graph.add_nodes_from(coordinates.keys())
         all_edges = set()
         for i, node in enumerate(self.current_environment.nodes):
+            neighbors = node.neighbors if show_all_neighbors else node.traversable_neighbors
             curr_edges = [(self.current_environment.nodes.index(n), i) if self.current_environment.nodes.index(n) < i
-                          else (i, self.current_environment.nodes.index(n)) for n in node.traversable_neighbors]
+                          else (i, self.current_environment.nodes.index(n)) for n in neighbors]
             all_edges = all_edges.union(set(curr_edges))
         networkx_graph.add_edges_from(list(all_edges))
-        colors_for_pheromones = [n.pheromones[-1] for n in self.current_environment.nodes]
-
+        # colors_for_pheromones = [n.pheromones[-1] for n in self.current_environment.nodes]
+        colors_for_pheromones = [25 for n in self.current_environment.nodes]
         # Draw the pheromones
         plt.subplot(221)
-        plt.title('Episode ' + str(episode) + ' Distance Pheromone. Goal: ' + str(self.goal_index))
+        plt.title('Map of Nodes and Edges')
         nx.draw(networkx_graph, node_color=colors_for_pheromones, pos=coordinates, node_size=500, with_labels=True,
-                cmap=plt.cm.Greens)
+                cmap=plt.cm.Greens)# Greens
 
         # Draw the current location of the agent
         plt.subplot(222)
-        plt.title('Episode ' + str(episode) + ' Agent Locations')
+        # plt.title('Map with Agent Locations Highlighted')
         index_current_agents = [self.current_environment.nodes.index(agent.current_node) for agent in
                                 self.current_environment.robots if agent.current_node != None]
         colors_of_agents = [50 if index in index_current_agents else 0 for index in
                             range(len(self.current_environment.nodes))]
+        plt.title('Map with Agent Locations Highlighted')
+        # colors_of_agents = [10 * n.pheromones[-2] for n in self.current_environment.nodes]
         nx.draw(networkx_graph, node_color=colors_of_agents, pos=coordinates, node_size=500, with_labels=True,
                 cmap=plt.cm.Blues)
 
         # Draw indications of where the boxes currently are
         plt.subplot(223)
-        plt.title('Episode ' + str(episode) + ' Box Location')
+        # plt.title('Map with Box Locations Highlighted')
         color_box_locations = [50 if node.box else 0 for node in self.current_environment.nodes]
+        plt.title('Map with Box Locations Highlighted')
+        # color_box_locations = [100 * n.pheromones[29] for n in self.current_environment.nodes]
         nx.draw(networkx_graph, node_color=color_box_locations, pos=coordinates, node_size=500, with_labels=True,
                 cmap=plt.cm.Reds)
 
         # Draw indications of where the holes are
         plt.subplot(224)
-        plt.title('Episode ' + str(episode) + ' Hole Locations')
+        # plt.title('Map with Hole Locations Highlighted')
         color_hole_locations = [50 if node.is_source else 0 for node in self.current_environment.nodes]
+        plt.title('Map with Hole Locations Highlighted')
+        # box = self.current_environment.boxes[2]
+        # color_hole_locations = [box.placement_preferences[self.current_environment.nodes.index(node)] if node.is_source else 0 for node in self.current_environment.nodes]
         nx.draw(networkx_graph, node_color=color_hole_locations, pos=coordinates, node_size=500, with_labels=True,
                 cmap=plt.cm.Reds)
 
@@ -242,8 +261,9 @@ class StigmergicGraph(object):
         for agent in agents_with_changed_targets:
             if agent.robot_id not in self.bot_to_current_path.keys() or len(self.bot_to_current_path[agent.robot_id]) == 0:
                 agent.choose_target(self)
-
+                # print(agent.robot_id, agent.target_pheromone, self.nodes.index(agent.target_node), self.nodes.index(agent.current_node))
         all_touched_nodes = []
+        print('new')
         for agent in agents_with_changed_targets:
             """ 
             If the pheromone is -1, then we are moving probabilistically towards higher D pheromones. 
@@ -256,9 +276,10 @@ class StigmergicGraph(object):
                 hole_is_being_filled_now = len(path) <= 2
                 agent_new_location = path[1] if not hole_is_being_filled_now else path[0]
                 path = path[:2]
-
+                print('movement: ', agent.robot_id, self.nodes.index(agent_new_location), hole_is_being_filled_now, self.nodes.index(agent.current_node))
                 box = agent.current_node.remove_box()
                 path[1].place_box(box)
+                print(self.nodes.index(path[1]))
 
                 # Assert that we only remove and place once and assert that there is a path to the box candidate place
                 assert not self.box_has_been_moved(box)
@@ -298,13 +319,14 @@ class StigmergicGraph(object):
             node.traversable_neighbors = traversable_neighbors
         # NOTE: Current node gets special treatment. If we want to move to a different node given at a node with box,
         # need to know if the other places can be traveled to
-        # current_node.neighbors = self.get_neighbors(current_node, RADIUS, include_intraversable=True)
-        # if len(current_node.box) > 0 and not self.box_has_been_moved(current_node.box[-1]):
-        #     box = current_node.box[-1]
-        #     current_node.traversable_neighbors = [n for n in current_node.neighbors if abs(n.z - (current_node.z - box.height)) < .1]
-        # else:
-        #     current_node.traversable_neighbors = self.get_neighbors(current_node, RADIUS, include_intraversable=False)
-        # return
+        if account_for_controls:
+            current_node.neighbors = self.get_neighbors(current_node, RADIUS, include_intraversable=True)
+            if len(current_node.box) > 0 and not self.box_has_been_moved(current_node.box[-1]):
+                box = current_node.box[-1]
+                current_node.traversable_neighbors = [n for n in current_node.neighbors if abs(n.z - (current_node.z - box.height)) < .1]
+            else:
+                current_node.traversable_neighbors = self.get_neighbors(current_node, RADIUS, include_intraversable=False)
+            return
 
     def add_d_pheromones_to_path(self, path):
         official_node_set = {n for n in self.nodes if n.official}
@@ -440,7 +462,7 @@ class StigmergicGraph(object):
             neighbors = node.traversable_neighbors
             if len(neighbors) > 0:
                 for p in hole_pheromones:
-                    max_p = max([n.pheromones[p] * np.exp(-1 * dist(node.pos, n.pos)) for n in neighbors])
+                    max_p = max([n.pheromones[p] * np.exp(-.1 * dist(node.pos, n.pos)) for n in neighbors])
                     if node.pheromones[p] < max_p:
                         node.pheromones[p] = max_p
         return

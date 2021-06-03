@@ -2,16 +2,17 @@ from collections import namedtuple
 import numpy as np
 import pickle
 
-Transition = namedtuple('Transition', ('global_state', 'global_action', 'global_state_prime'))
+Transition = namedtuple('Transition', ('local_state', 'local_action', 'local_state_prime',
+                                       'global_state', 'global_greedy', 'next_global_state', 'next_global_greedy'))
 
 
-class ModelMemory(object):
+class DistributionMemory(object):
     def __init__(self, size=100000):
         self.memory = []
         self.position = 0
         self.size = size
 
-    def push(self, global_state, global_action, global_state_prime):
+    def push(self, local_state, local_action, local_state_prime, global_state, global_greedy, next_global_state, next_global_greedy):
         """ Global_state: state inputted into neural network for global reward
             Global_action: joint action taken in this sample
             reward: reward associated with this sample
@@ -19,7 +20,7 @@ class ModelMemory(object):
         """
         if len(self.memory) >= self.size:
             self.memory.pop(0)
-        self.memory.append(Transition(global_state, global_action, global_state_prime))
+        self.memory.append(Transition(local_state, local_action, local_state_prime, global_state, global_greedy, next_global_state, next_global_greedy))
 
     def sample(self, batch=128):
         """ Randomly sample batch from replay """

@@ -91,8 +91,8 @@ class StigmergicAgent(object):
         prob = (np.exp(np.array(prob)) - 1) + .01
         return prob / np.sum(prob)  # normalize probabilities
 
-    def get_box(self, graph):
-        return None if all([graph.box_has_been_moved(b) or b.claimed for b in self.current_node.box]) else self.current_node.box[-1]
+    def get_box(self, graph):  # No need take into account claimed because agents cannot be in same node anyway.
+        return None if all([graph.box_has_been_moved(b) for b in self.current_node.box]) else self.current_node.box[-1]
 
     def choose_target(self, graph, reachable_box_nodes=None):
         randomize = np.random.random()
@@ -246,7 +246,7 @@ class StigmergicAgentVREP(StigmergicAgent):
                     p = self.softmax_skewed_down(hole_preferences)
                     hole_index_choice = lst_of_hole_indices[np.random.choice(len(p), p=p)]
                     box_pheromone_to_node_associated_to_hole[box_index_pheromone] = graph.nodes[hole_index_choice]
-                    new_pheromone_concentration = max(box.placement_preferences.values()) # box.placement_preferences[hole_index_choice]  # TODO: This was changed!
+                    new_pheromone_concentration = box.placement_preferences[hole_index_choice]  # TODO: This was changed!
                     max_pheromones_to_associated_node.append((new_pheromone_concentration, box_index_pheromone, closest_node_with_box))
             if len(max_pheromones_to_associated_node) == 0:
                 self.target_node = None
@@ -338,6 +338,6 @@ class Node(object):
             for box in self.box:
                 if box.box_id == self.box_id and graph.box_has_been_moved(box):
                     box.placement_preferences[graph.nodes.index(self)] *= (1.0 / aa_graphMap_node_simulation.B_preference_decay)
-                    box.placement_preferences[graph.nodes.index(self)] = min(box.placement_preferences[graph.nodes.index(self)], 3 * aa_graphMap_node_simulation.MAX_DISTANCE_SET)
+                    box.placement_preferences[graph.nodes.index(self)] = min(box.placement_preferences[graph.nodes.index(self)], 10 * aa_graphMap_node_simulation.MAX_DISTANCE_SET)
                     print('New placement preference', graph.boxes.index(box), box.placement_preferences[graph.nodes.index(self)])
         self.pheromones[-1] = concentration

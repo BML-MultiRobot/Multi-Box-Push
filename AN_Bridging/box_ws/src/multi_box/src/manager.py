@@ -7,11 +7,12 @@ import sys
 import vrep
 import time
 
-VREP_SCENES = [('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt') ]
-                # ('elevated_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_simulation.ttt'),
-                # ('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt'),]
+# VREP_SCENES = [ ('elevated_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_simulation.ttt')]
+                #,
+                # ('flat_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_flat_simulation.ttt')]
+                # ('slope_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/box_slope_single_simulation.ttt')
 
-# VREP_SCENES = [('stigmergic_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/stigmergic_simulation2.ttt')]
+VREP_SCENES = [('stigmergic_scene', '/home/jimmy/Documents/Research/AN_Bridging/Sims/stigmergic_simulation1.ttt')]
 
 
 class Manager:
@@ -58,15 +59,10 @@ class Manager:
 
             # Wait for signal to stop
             while not self.restart:
-                restart = rospy.wait_for_message('/restart', Int8)
-                self.restart = restart if restart == 1 else self.restart
+                x = 1 + 1
 
             # Stop and restart simulation
             vrep.simxStopSimulation(clientID, vrep.simx_opmode_oneshot)
-            is_running = True
-            while is_running:
-                error_code, server_state = vrep.simxGetInMessageInfo(clientID, vrep.simx_headeroffset_server_state)
-                is_running = server_state & 1
             counter += 1
 
         # Finished all episodes
@@ -76,7 +72,7 @@ class Manager:
         fin.publish(msg)
 
     def receiveStatus(self, message):
-        return
+        self.restart = message.data if message.data == 1 else self.restart
 
 
 episodes = 1200
