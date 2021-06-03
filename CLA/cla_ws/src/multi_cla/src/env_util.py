@@ -36,11 +36,44 @@ def to_state_id(num_bots, locations, orientations, ball_location, near_ball):
 
         state_id = 0
         for i, f in enumerate(f):
-            state_id += f * (10 ** i)
+            state_id += f * (100 ** i)
         state_ids[robot_id] = state_id
 
     return state_ids, location_indicators, allowed
 
+def agent_moved(s, s_prime):
+    return s % 10000 != s_prime % 10000
+
+def convert_to_rotation_invariant(states, actions):
+    sphere_y = states[-1:]
+    agent_locations = states[:-1]
+    x = agent_locations[::2]
+    y = agent_locations[1::2]
+
+    arc_tans = np.arctan2(y, x)
+    arc_tans = np.where(arc_tans < 0, arc_tans + 2 * np.pi, arc_tans)
+    indices_each_row = np.argsort(arc_tans)
+
+    new_x_indices = indices_each_row * 2
+    new_y_indices = indices_each_row * 2 + 1
+
+    new_indices = np.zeros(agent_locations.shape)
+    new_indices[::2] = new_x_indices
+    new_indices[1::2] = new_y_indices
+    new_indices = new_indices.astype(int)
+
+    # These should create new copies of new_states and new_actions. No in-place operations
+    new_states = states[new_indices]
+    new_states = np.append(new_states, sphere_y)
+    new_actions = actions[indices_each_row]
+
+    return new_states, new_actions
+
+def get_rotation_map(locations_relative_to_ball):
+    angles = [np.arctan2(tup[1], tup[0]) for tup in locations_relative_to_ball]
+    angles = [a + 2 * np.pi if a < 0 else a for a in angles]
+    state_place_to_id = np.argsort(angles)
+    return state_place_to_id
 
 def determine_direction(location, orientation, target):
     """ Return 0, 1, 2, 3 for front, left, back, right """
@@ -98,7 +131,8 @@ def determine_direction(location, orientation, target):
     elif max_dir == 7:
         actual_location = 7 if along_157 > 0 else 15
 
-    return state_location, actual_location
+    # return state_location, actual_location
+    return actual_location, actual_location
 
 
 def distance(point1, point2):

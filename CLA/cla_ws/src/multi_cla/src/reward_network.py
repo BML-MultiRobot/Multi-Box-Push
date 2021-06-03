@@ -2,25 +2,26 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
+import torch.nn.functional as F
 import numpy as np
 
 
 class RewardNetwork(nn.Module):
-    def __init__(self, neurons, lr, num_actions, num_bots, boltzmann=25, noise=.02):
+    def __init__(self, neurons, num_actions, num_bots, params):
         super(RewardNetwork, self).__init__()
         self.layers, self.neurons = [], neurons
         self.n_layers = len(self.neurons) - 2
         self.num_actions = num_actions
         self.num_bots = num_bots
         self.output = None
-        self.lr = lr
-        self.noise_std = noise
-        self.boltzmann = boltzmann
+        self.lr = params['reward_lr']
+        self.noise_std = params['noise_std']
+
+        self.reward_buff = params['reward_weight']
+        self.counterfactual = params['counterfactual']
 
         self.createFeatures()
-
         self.optimizer = optim.Adam(super(RewardNetwork, self).parameters(), lr=self.lr)
         return
 
@@ -79,49 +80,22 @@ class RewardNetwork(nn.Module):
         x = torch.cat((s.float(), a.float()), dim=1)
         return self.forward(x)
 
-    def get_advantage(self, s, a, next_s, next_a, robot_ids, p, normalize=False, model=None):
+    def get_advantage(self, s, a, robot_ids, local_s, local_s_prime, reward):
         """ s: n x d array of global states
             a: n x r array of global action indices
             robot_ids: n x 1 array of the agent id in question
             p: n x u array of current automata action probabilities
 
             Output: beta values for each action (0 to 1), 1 being most favorable """
-        p = torch.from_numpy(p)
+
         output = self.forward_from_numpy_all_actions(s, a, robot_ids)
-        expected_value = torch.mean(output, dim=1).unsqueeze(1)# torch.sum(output * p, dim=1).unsqueeze(1)
-
-        if model:
-            next_states = model.forward_from_numpy_all_actions(s, a, robot_ids)  # n x u x s
-            next_a_repeat = np.expand_dims(next_a, axis=1)  # n x r -> n x 1 x r
-            next_a_repeat = np.repeat(next_a_repeat, repeats=self.num_actions, axis=1)  # n x 1 x r -> n x u x r
-            next_r_distribution = self.forward_from_numpy_all_actions(next_states, next_a_repeat, robot_ids)  # n x u x u
-            next_max_r = torch.max(next_r_distribution, dim=2)[0] # n x u
-
-            curr_max_r = torch.max(output, dim=1)[0].unsqueeze(1) # n x 1
-            delta_r = next_max_r - curr_max_r  # n x u
-
-            contribution_r = output - expected_value
-            distribution_r = delta_r - torch.mean(delta_r, dim=1).unsqueeze(1)
-            print('min, max distribution: ', torch.min(distribution_r), torch.max(distribution_r),
-                  'min, max contribution: ', torch.min(contribution_r), torch.max(contribution_r))
-            advantages = contribution_r + distribution_r
-
+        expected_value = torch.mean(output, dim=1).unsqueeze(1)
+        if self.counterfactual:
+            advantages = self.reward_buff * (output - expected_value)
         else:
-            advantages = output - expected_value
+            return self.reward_buff * torch.from_numpy(reward.reshape((-1, 1)))
         if any(torch.isnan(advantages).flatten()):
-            print('NAN DETECTED IN GET_ADVANTAGE: ', output, '#### EXPECTED VALUE ####', expected_value, '### P ###', p)
-
-        if normalize:
-            minimum, _ = torch.min(advantages, dim=1)
-            minimum = minimum.unsqueeze(1)
-            advantages = advantages - minimum + 1
-
-            advantages = torch.exp(advantages * self.boltzmann)
-
-            maximum, _ = torch.max(advantages, dim=1)
-            maximum = maximum.unsqueeze(1)
-
-            advantages = advantages / maximum
+            print('NAN DETECTED IN GET_ADVANTAGE: ', output, '#### EXPECTED VALUE ####', expected_value)
 
         robot_ids = torch.from_numpy(robot_ids).unsqueeze(1)
         particular_actions = torch.gather(torch.from_numpy(a), 1, robot_ids)

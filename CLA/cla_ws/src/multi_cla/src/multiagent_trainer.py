@@ -9,14 +9,12 @@ from vrep_util.vrep import *
 import matplotlib.pyplot as plt
 import torch
 
-from buffers.policy_buffer import PolicyMemory
+from buffers.off_policy_buffer import PolicyMemory
+from buffers.on_policy_buffer import OnPolicyMemory
 from buffers.reward_buffer import RewardMemory
-from buffers.model_buffer import ModelMemory
 from cla import CLA
 from reward_network import RewardNetwork
-from model import Model
-from env_util import to_state_id, save_data
-import pickle
+from env_util import to_state_id, save_data, load_data, get_rotation_map, convert_to_rotation_invariant, agent_moved
 
 
 Agent = namedtuple('Agent', ['x', 'y', 'ori', 'id'])
@@ -31,7 +29,8 @@ class MultiAgent:
         self.locations = [(0, 0)] * num_agents  # maps robot id to current location tuple
         self.orientations = [0] * num_agents
         self.ball_location, self.prev_ball, self.ball_start = (0, 0), None, (0, 0)
-        self.action_map = {0, 1, 2, 3}# {0, 1}
+        self.action_map = {0, 1, 2, 3}  # {0, 1}
+        self.movement_constraint = params['movement_constraint']
 
         """ ROS Subscriptions and Publishers """
         self.target_publishers = {i: rospy.Publisher("/goalPosition" + str(i), Vector3, queue_size=1) for i in range(num_agents)}
@@ -58,39 +57,40 @@ class MultiAgent:
 
         """ Buffer Replays """
         self.reward_buffer = RewardMemory(size=1e6)
-        self.policy_buffer = PolicyMemory()
-        self.model_buffer = ModelMemory()
+        self.policy_buffer = PolicyMemory(size=params['policy_buffer_size'])
+        self.on_policy_buffer = OnPolicyMemory(size=params['on_policy_buffer_size'])
 
         """ Policy CLA Parameters"""
-        state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7], [0, 1], [0, 1, 2], [0, 1], [0, 1]]
-        self.policy = CLA(state_indicators, self.u_n, params['a'], params['b'], params['q_learn'], params['gamma'], params['td_lambda'],
-                          params['alpha'], params['steps_per_train'], params['q_lr'], params['explore'], params['explore_decay'], params['min_explore'], params['test_mode'])
-        self.policy_epochs = params['policy_epochs']
+        state_indicators = [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1], [0, 1, 2], [0, 1], [0, 1]]
+
+        if params['load_policy']:
+            self.policy = load_data(params['load_policy'])
+        else:
+            self.policy = CLA(state_indicators, self.u_n, params)
         self.rim_size = params['rim_size']
-        self.near_ball = .225
+        self.near_ball = params['near_ball']
         self.near_agent = .1
+        self.policy_batch = params['policy_batch']
+        self.policy_steps = params['policy_steps']
+        self.distribution_hold = params['distribution_hold']
+        self.distribution_explore = params['distribution_explore']
 
         """ Reward Network Parameters """
-        self.reward_network = RewardNetwork(neurons, params['reward_lr'], self.u_n, self.num_agents, params['boltzmann'], params['noise_std'])
+        self.reward_network = RewardNetwork(neurons, self.u_n, self.num_agents, params)
         self.rotation_invariant = params['rotation_invariance']
-        self.train_every = params['train_every']
         self.reward_batch = params['reward_batch']
-        self.train_now = params['explore_steps']
-        self.epochs = params['epochs']
-
-        """ Model Network Parameters """
-        model_neurons = [3*self.num_agents + 1] + [params['reward_width']] * params['reward_depth'] + [2*self.num_agents + 1]
-        self.model = Model(model_neurons, params['reward_lr'], self.u_n, self.num_agents, params['noise_std'])
+        self.explore_steps = params['explore_steps']
+        self.reward_epochs = params['reward_epochs']
+        if params['reward_path']:
+            self.reward_network.load_state_dict(torch.load(params['reward_path']))
 
         """ Trackers for data """
-        self.reward_network_loss, self.model_network_loss, self.entropy, self.episode_rewards, self.x_travel, self.y_travel = [], [], [], [], [], []
-        self.entropy.append(self.policy.average_entropy())
+        self.reward_network_loss, self.entropy, self.episode_rewards, self.x_travel, self.y_travel, self.q_loss, self.coma_loss = [], [], [], [], [], [], []
+        self.entropy.append(self.policy.average_entropy(False))
         self.curr_reward = 0
 
         """ Testing """
         self.test_mode = params['test_mode']
-        if self.test_mode:
-            self.policy.load_policy('/home/jimmy/Documents/Research/CLA/results/03_11_2021/policy.pickle')
 
         rospy.sleep(3)
         self.pub_start.publish(Int8(1))
@@ -115,11 +115,11 @@ class MultiAgent:
         self.steps[agent.id] += 1
         self.ball_start = self.ball_location if self.total_steps == 0 else self.ball_start
         if not any(self.steps <= self.period):
-            sys.exit(0) # make sure each time step is accounted for
+            sys.exit(0)  # make sure each time step is accounted for
         if all(self.steps >= self.period):
-            self.time = rospy.get_time()
             states, targets, actions = self.action_step()
             failed = self.failed()
+
             if self.total_steps >= self.episode_length or failed:
                 print('Time per iteration: ', rospy.get_time() - self.time)
                 self.record(states, actions, done=int(failed), episode_end=int(True))
@@ -128,6 +128,7 @@ class MultiAgent:
                 self.steps = np.array([0] * num_agents)
                 self.total_steps += 1
                 self.record(states, actions)
+            self.time = rospy.get_time()
         return
 
     def failed(self):
@@ -145,11 +146,14 @@ class MultiAgent:
         self.x_travel.append(delta_x)
         self.y_travel.append(dev_y)
 
+        self.train()
+
         print('Reward Buffer: ', len(self.reward_buffer), 'Policy Buffer: ', len(self.policy_buffer))
         print('Rewards: ', self.curr_reward, ' X Travel: ', delta_x, '  Y Abs Travel: ', dev_y)
+        if len(self.entropy) > 0 and len(self.reward_network_loss) > 0 and len(self.q_loss) > 0 and len(self.coma_loss) > 0:
+            print('Entropy: ', self.entropy[-1], ' Reward Average Losses: ', self.reward_network_loss[-1],
+                  ' Q Loss: ', self.q_loss[-1], ' Coma LOSS', self.coma_loss[-1])
         print('')
-
-        self.train()
 
         self.prev_local_sample = {}
         self.prev_reordering = []
@@ -173,18 +177,35 @@ class MultiAgent:
             self.reward_buffer.push(prev_global_state, prev_global_action, r, self.num_agents)
             self.curr_reward += r
 
-            # Model Buffer
-            self.model_buffer.push(prev_global_state, prev_global_action, curr_global_state.state)
+            # Joint Buffer
+            if self.distribution_hold - self.distribution_explore <= 0:
+                for i in self.prev_local_sample.keys():
+                    prev_s, prev_a = self.prev_local_sample[i]
+                    state_index = id_to_state_place[i]
+                    if prev_a == prev_global_action[state_index]:
+                        self.on_policy_buffer.push(prev_s, prev_a, states[i], actions[i], state_index, done, r,
+                                                prev_global_state,
+                                                prev_global_action, curr_global_state.state, curr_global_state.action,
+                                                episode_end, i)
+                    else:
+                        print(
+                            '### DANGER. Possible data recording bug in function "record" under multiagent_coordinator? ')
 
             # Policy Buffer
             for i in self.prev_local_sample.keys():
                 prev_s, prev_a = self.prev_local_sample[i]
                 state_index = id_to_state_place[i]
                 if prev_a == prev_global_action[state_index]:
-                    self.policy_buffer.push(prev_s, prev_a, states[i], actions[i], state_index, done, prev_global_state,
-                                            prev_global_action, curr_global_state.state, curr_global_state.action, episode_end, i)
+
+                    self.policy_buffer.push(prev_s, prev_a, states[i], actions[i], state_index, done, r, prev_global_state,
+                                            prev_global_action)
+
                 else:
                     print('### DANGER. Possible data recording bug in function "record" under multiagent_coordinator? ')
+            # if self.distribution_hold == 0:
+            #     self.policy_buffer.clear(leave=self.distribution_explore * (self.num_agents * self.episode_length))
+        else:
+            print(' Empty. Waiting for next one. ')
 
         # Reset prev
         self.prev_local_sample = {i: Sample(states[i], actions[i]) for i in range(self.num_agents)}
@@ -196,61 +217,36 @@ class MultiAgent:
     def train(self, override=False):
         """ Handles training the CLA agent """
         # Update the reward network
-        if (override or (len(self.reward_buffer) >= self.train_now)) and not self.test_mode:
+        if (override or (len(self.reward_buffer) >= self.explore_steps)) and not self.test_mode:
             # Train Reward
-            print(' ######### TRAINING #########')
-            batches = self.reward_buffer.batch_all_memory(self.reward_batch)
-            model_batches = self.model_buffer.batch_all_memory(self.reward_batch)
-            for i in range(self.epochs):
-                sys.stdout.write("\r Reward & Model Training Progress: %d%%" % (int(100*(i+1)/self.epochs)))
-                sys.stdout.flush()
-                epoch_loss = self.reward_network.train_multiple_transitions(batches)
-                model_loss = self.model.train_multiple_transitions(model_batches)
-                self.model_network_loss.append(model_loss)
+            for i in range(self.reward_epochs):
+                batch = self.reward_buffer.batch_all_memory(self.reward_batch)
+                epoch_loss = self.reward_network.train_multiple_transitions(batch)
                 self.reward_network_loss.append(epoch_loss)
-            print('Reward Average Losses: ', self.reward_network_loss[-1], 'Model Average Losses: ', self.model_network_loss[-1])
-            print('')
 
-            # Train Policy
-            rollouts = self.policy_buffer.batch_all_memory(shuffle=(not self.policy.q_learn))
-            for i in range(self.policy_epochs):
-                sys.stdout.write("\r Policy Training Progress: %d%%" % (int(100 * (i + 1) / self.policy_epochs)))
-                sys.stdout.flush()
-                self.update_policy(rollouts)
-            self.policy.update_explore()
-            print(self.policy.policy[11214], self.policy.q_values[11214], self.policy.policy[210], self.policy.q_values[210])
-            print('Entropy: ', self.entropy[-1])
-            print('')
+            if len(self.policy_buffer) >= self.explore_steps * self.num_agents:
+                if self.distribution_hold <= 0:
+                    rollouts = self.on_policy_buffer.batch_all_memory(shuffle=False)
+                    self.policy.update_policy(rollouts, None, self.distribution_hold <= 0)
+                    # TODO: Clear on_policy_buffer
+                else:
+                    for i in range(self.policy_steps):
+                        # Train Policy
+                        samples = self.policy_buffer.sample(batch=self.policy_batch)
+                        average_entropy, q_loss = self.policy.update_policy(samples, self.reward_network, self.distribution_hold <= 0)
+                        self.entropy.append(average_entropy)
+                        self.q_loss.append(q_loss)
 
-            self.policy_buffer.clear()
-            if not override:
-                self.train_now = len(self.reward_buffer) + self.train_every
+            print('distribution hold: ', self.distribution_hold, '  explore: ', self.policy.explore)
+            p = self.policy.policy_final if self.distribution_hold <= 0 else self.policy.policy
+            print(' Bottom left: ', p[100020110], '  Center: ', p[20008], '   Top left: ', p[1020108])
+            self.policy.update_explore(self.distribution_hold <= 0)
+            self.distribution_hold -= 1
 
         return
 
-    def update_reward(self, r_trans):
-        reward_network_loss = self.reward_network.train_single_transition(r_trans)
-        self.reward_network_loss.append(reward_network_loss)
-
-    def update_policy(self, rollouts):
-        average_entropy = self.policy.update_policy(rollouts, self.reward_network, self.model)
-        self.entropy.append(average_entropy)
-
     def reward_function(self, s, a, s_prime):
         """ Reward Function using global states and actions """
-        s, s_prime = s.flatten(), s_prime.flatten()
-
-        locations = s[:-1]
-        squared = np.square(locations)
-
-        squared_distances = squared[::2] + squared[1::2]
-        prev_distance = np.sum(np.sqrt(squared_distances))
-
-        locations = s_prime[:-1]
-        squared = np.square(locations)
-        squared_distances = squared[::2] + squared[1::2]
-        new_distance = np.sum(np.sqrt(squared_distances))
-
         r_ball_forward = self.ball_location[0] - self.prev_ball[0]
         r_ball_side = abs(self.prev_ball[1]) - abs(self.ball_location[1])
         return r_ball_forward * 5 + r_ball_side * 5
@@ -261,8 +257,8 @@ class MultiAgent:
         local_states, location_indicators, allowed = to_state_id(self.num_agents, self.locations,
                                                                   self.orientations, self.ball_location, self.near_ball)
         for i in range(self.num_agents):
-            actions[i] = self.policy.get_action(local_states[i])
-            if actions[i] == 0 or actions[i] == 1 or (actions[i] == 2 and not allowed[i]['c']) or (actions[i] == 3 and not allowed[i]['cc']):
+            actions[i] = self.policy.get_action(local_states[i], self.distribution_hold <= 0, probabilistic=True)
+            if actions[i] == 0 or actions[i] == 1 or (self.movement_constraint and (actions[i] == 2 and not allowed[i]['c']) or (actions[i] == 3 and not allowed[i]['cc'])):
                 targets[i] = Target(location_indicators[i] * (np.pi/8), min(actions[i], 1) * self.rim_size)
             elif actions[i] == 2:
                 targets[i] = Target(((location_indicators[i] - 1) % 16) * (np.pi/8), self.rim_size)
@@ -287,17 +283,16 @@ class MultiAgent:
         save_data('/home/jimmy/Documents/Research/CLA/results/episode_rewards.pickle', self.episode_rewards)
         save_data('/home/jimmy/Documents/Research/CLA/results/x_travel.pickle', self.x_travel)
         save_data('/home/jimmy/Documents/Research/CLA/results/y_travel.pickle', self.y_travel)
-        save_data('/home/jimmy/Documents/Research/CLA/results/model_net_loss.pickle', self.model_network_loss)
+        save_data('/home/jimmy/Documents/Research/CLA/results/q_loss.pickle', self.q_loss)
 
         torch.save(self.reward_network.state_dict(), '/home/jimmy/Documents/Research/CLA/results/reward_network.txt')
-        torch.save(self.model.state_dict(), '/home/jimmy/Documents/Research/CLA/results/model.txt')
 
         plt.plot(range(len(self.reward_network_loss)), self.reward_network_loss)
         plt.title('Reward Network Loss over Training Steps')
         plt.show()
 
-        plt.plot(range(len(self.model_network_loss)), self.model_network_loss)
-        plt.title('Model Network Loss over Training Steps')
+        plt.plot(range(len(self.q_loss)), self.q_loss)
+        plt.title('Q Value Average Loss over Training Steps')
         plt.show()
 
         plt.plot(range(len(self.entropy)), self.entropy)
@@ -319,16 +314,13 @@ class MultiAgent:
             all_actions.append(actions_dict[i])
 
         if self.rotation_invariant:
-            angles = [np.arctan2(tup[1], tup[0]) for tup in locations_relative_to_ball]
-            angles = [a + 2*np.pi if a < 0 else a for a in angles]
-            state_place_to_id = np.argsort(angles)
+            state_place_to_id = get_rotation_map(locations_relative_to_ball)
             locations_relative_to_ball = np.take(locations_relative_to_ball, state_place_to_id, axis=0).flatten()
             all_actions = np.take(all_actions, state_place_to_id).flatten()
             id_to_state_place = {robot_id: state_place for state_place, robot_id in enumerate(state_place_to_id)}
         else:
             id_to_state_place = {i: i for i in range(self.num_agents)}
             all_actions = np.array(all_actions).flatten()
-
         state = np.append(locations_relative_to_ball, self.ball_location[1])
         return Sample(state, all_actions), id_to_state_place
 
@@ -338,28 +330,29 @@ if __name__ == '__main__':
     num_agents = rospy.get_param('~num_bots')
     params = {
               # general parameters
-              'train_every': 2000, 'max_ep_len': 50, 'explore_steps': 2000, 'test_mode': False,
+              'max_ep_len': 100, 'explore_steps': 1000, 'test_mode': False,
 
               # reward network
               'reward_width': 300, 'reward_depth': 3, 'reward_lr': 3e-4,
-              'reward_batch': 250, 'rotation_invariance': False, 'epochs': 75,
-              'noise_std': 0,
+              'reward_batch': 200, 'rotation_invariance': True,
+              'noise_std': 0, 'reward_weight': 16, 'reward_epochs': 5,
+              'reward_path': None, # '/home/jimmy/Documents/Research/CLA/results/off_policy_cf_ddac_8_weight_2_state/reward_network.txt', # None,
 
               # General Policy parameters
-              'policy_epochs': 1, 'a': .25,   # a = lr for q learn policy gradient
-
-              # cla-specific parameters
-              'b': 0, 'boltzmann': 50,
+              'policy_batch': 250, 'a': 5e-2,  # a = lr for q learn policy gradient
+              'load_policy': None, #'/home/jimmy/Documents/Research/CLA/results/off_policy_cf_ddac_8_weight_2_state/policy.pickle',  # '/home/jimmy/Documents/Research/CLA/results/off_policy_cf_ddac/policy.pickle',
+              'movement_constraint': True,  # Toggles whether we constrain action space with if statements
+              'policy_steps': 10, 'policy_buffer_size': 10000,
 
               # diff-q policy gradient parameters
-              'q_learn': True, 'q_lr': .1, 'gamma': .99, 'td_lambda': .25, 'alpha': 1, # proportion for reward attribution vs intrinsic
-              'steps_per_train': 1,
+              'q_lr': .05, 'gamma': .98,
+              'counterfactual': True, 'distribution_hold': 0, 'distribution_explore': 0,
 
               # control parameters
               # 'rim_size': .02,
-              'rim_size': .05,
+              'rim_size': .075, 'near_ball': .325,
 
               # exploration
-              'explore': 1, 'explore_decay': .85, 'min_explore': .05,
+              'explore': .1, 'final_explore': 0, 'final_explore_decrement': .01,
               }
     agent = MultiAgent(num_agents, params)
